@@ -91,8 +91,8 @@ fun PaymentFooter(
                                 }
                             }
                         }
-                        // Web price
-                        if (isWebCheckoutEnabled) {
+                        // Web price (only shown when web checkout is available for this product)
+                        if (isWebCheckoutEnabled && product.webPrice != null) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -104,7 +104,7 @@ fun PaymentFooter(
                                     tint = Green,
                                 )
                                 Text(
-                                    text = product.webPrice.formatted,
+                                    text = product.webPrice?.formatted ?: "—",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Medium,
                                     color = Green,
@@ -160,8 +160,8 @@ fun PaymentFooter(
                     )
                 }
 
-                // Web Checkout button
-                if (isWebCheckoutEnabled) {
+                // Web Checkout button (only shown when product has a web price)
+                if (isWebCheckoutEnabled && selectedProduct?.webPrice != null) {
                     val webDisabled = selectedProduct == null || isProcessing
 
                     Button(

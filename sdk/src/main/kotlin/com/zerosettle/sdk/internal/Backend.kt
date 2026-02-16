@@ -26,6 +26,7 @@ internal class Backend(
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
+        explicitNulls = false
     }
 
     private val authHeaders: Map<String, String>

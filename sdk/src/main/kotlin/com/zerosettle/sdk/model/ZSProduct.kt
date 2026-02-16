@@ -20,7 +20,7 @@ data class ZSProduct(
     val productDescription: String,
     val type: ZSProductType,
     @SerialName("web_price")
-    val webPrice: Price,
+    val webPrice: Price? = null,
     @SerialName("storekit_price")
     val appStorePrice: Price? = null,
     @SerialName("synced_to_asc")
@@ -49,9 +49,10 @@ data class ZSProduct(
 
                 val micros = oneTimeMicros ?: subMicros
                 if (micros != null) {
+                    val currency = webPrice?.currencyCode ?: appStorePrice?.currencyCode ?: "USD"
                     return Price(
                         amountMicros = micros.toInt(),
-                        currencyCode = webPrice.currencyCode
+                        currencyCode = currency
                     )
                 }
             }
@@ -64,10 +65,11 @@ data class ZSProduct(
      */
     val savingsPercent: Int?
         get() {
+            val wp = webPrice ?: return null
             val psPrice = playStorePrice ?: return null
             if (psPrice.amountMicros <= 0) return null
             val savings =
-                (psPrice.amountMicros - webPrice.amountMicros).toDouble() / psPrice.amountMicros
+                (psPrice.amountMicros - wp.amountMicros).toDouble() / psPrice.amountMicros
             val percent = (savings * 100).toInt()
             return if (percent > 0) percent else null
         }

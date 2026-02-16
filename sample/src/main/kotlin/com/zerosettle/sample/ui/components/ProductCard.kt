@@ -202,53 +202,63 @@ fun ProductCard(
 
                         Spacer(Modifier.height(4.dp))
 
-                        // Play Store price (strikethrough)
-                        if (product.playStoreAvailable) {
-                            product.playStorePrice?.let { psPrice ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Text(
-                                        text = "\u25B6",
-                                        fontSize = 8.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Text(
-                                        text = psPrice.formatted,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textDecoration = TextDecoration.LineThrough,
-                                    )
+                        if (product.webPrice != null) {
+                            // Dual pricing: Play Store (strikethrough) + web price
+                            if (product.playStoreAvailable) {
+                                product.playStorePrice?.let { psPrice ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        Text(
+                                            text = "\u25B6",
+                                            fontSize = 8.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            text = psPrice.formatted,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textDecoration = TextDecoration.LineThrough,
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        // Web price (primary)
-                        Row(
-                            verticalAlignment = Alignment.Bottom,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(
-                                text = product.webPrice.formatted,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            product.savingsPercent?.let { savings ->
-                                if (savings > 0) {
-                                    Text(
-                                        text = "Save $savings%",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Green,
-                                        modifier = Modifier
-                                            .background(
-                                                Green.copy(alpha = 0.12f),
-                                                RoundedCornerShape(4.dp),
-                                            )
-                                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                                    )
+                            Row(
+                                verticalAlignment = Alignment.Bottom,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = product.webPrice?.formatted ?: "—",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                product.savingsPercent?.let { savings ->
+                                    if (savings > 0) {
+                                        Text(
+                                            text = "Save $savings%",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Green,
+                                            modifier = Modifier
+                                                .background(
+                                                    Green.copy(alpha = 0.12f),
+                                                    RoundedCornerShape(4.dp),
+                                                )
+                                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        )
+                                    }
                                 }
+                            }
+                        } else {
+                            // Play Store-only pricing
+                            product.playStorePrice?.let { psPrice ->
+                                Text(
+                                    text = psPrice.formatted,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
                             }
                         }
                     }

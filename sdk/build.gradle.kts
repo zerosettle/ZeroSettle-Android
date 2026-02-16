@@ -35,7 +35,7 @@ mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()
 
-    coordinates("io.zerosettle", "zerosettle-android", "0.9.0")
+    coordinates("io.zerosettle", "zerosettle-android", "0.10.0")
 
     pom {
         name.set("ZeroSettle Android SDK")
