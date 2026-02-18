@@ -15,21 +15,21 @@ data class Promotion(
     val promotionalPrice: Price,
     @SerialName("expires_at")
     val expiresAt: String? = null,
-    val type: PromotionType,
-)
+    val type: Kind,
+) {
+    /**
+     * The type of promotional discount.
+     * String values match iOS raw values for backend compatibility.
+     */
+    @Serializable
+    enum class Kind {
+        @SerialName("percent_off")
+        PERCENT_OFF,
 
-/**
- * The type of promotional discount.
- * String values match iOS raw values for backend compatibility.
- */
-@Serializable
-enum class PromotionType {
-    @SerialName("percent_off")
-    PERCENT_OFF,
+        @SerialName("fixed_amount")
+        FIXED_AMOUNT,
 
-    @SerialName("fixed_amount")
-    FIXED_AMOUNT,
-
-    @SerialName("free_trial")
-    FREE_TRIAL,
+        @SerialName("free_trial")
+        FREE_TRIAL,
+    }
 }

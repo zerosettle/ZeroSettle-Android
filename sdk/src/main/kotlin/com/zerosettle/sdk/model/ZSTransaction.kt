@@ -11,32 +11,32 @@ data class ZSTransaction(
     val id: String,
     @SerialName("product_id")
     val productId: String,
-    val status: TransactionStatus,
-    val source: EntitlementSource,
+    val status: Status,
+    val source: Entitlement.Source,
     @SerialName("purchased_at")
     val purchasedAt: String,
     @SerialName("expires_at")
     val expiresAt: String? = null,
-)
+) {
+    /**
+     * The status of a transaction.
+     * String values match iOS raw values for backend compatibility.
+     */
+    @Serializable
+    enum class Status {
+        @SerialName("completed")
+        COMPLETED,
 
-/**
- * The status of a transaction.
- * String values match iOS raw values for backend compatibility.
- */
-@Serializable
-enum class TransactionStatus {
-    @SerialName("completed")
-    COMPLETED,
+        @SerialName("pending")
+        PENDING,
 
-    @SerialName("pending")
-    PENDING,
+        @SerialName("processing")
+        PROCESSING,
 
-    @SerialName("processing")
-    PROCESSING,
+        @SerialName("failed")
+        FAILED,
 
-    @SerialName("failed")
-    FAILED,
-
-    @SerialName("refunded")
-    REFUNDED,
+        @SerialName("refunded")
+        REFUNDED,
+    }
 }

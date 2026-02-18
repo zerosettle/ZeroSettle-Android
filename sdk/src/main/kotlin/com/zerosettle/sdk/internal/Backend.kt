@@ -127,8 +127,8 @@ internal class Backend(
             lastTransaction = transaction
 
             when (transaction.status) {
-                TransactionStatus.COMPLETED -> return transaction
-                TransactionStatus.PROCESSING -> {
+                ZSTransaction.Status.COMPLETED -> return transaction
+                ZSTransaction.Status.PROCESSING -> {
                     if (attempt < maxAttempts) {
                         delay(pollIntervalMs)
                         continue
@@ -210,6 +210,36 @@ internal class Backend(
         try {
             httpClient.postVoid(
                 url = apiUrl("iap/play-store-transactions/"),
+                body = body,
+                headers = authHeaders,
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
+    // -- Cancel Flow --
+
+    suspend fun fetchCancelFlow(): CancelFlowConfig {
+        return try {
+            httpClient.get(
+                url = apiUrl("iap/cancel-flow/"),
+                headers = authHeaders,
+                deserializer = CancelFlowConfig.serializer(),
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
+    suspend fun submitCancelFlowResponse(payload: CancelFlowResponsePayload) {
+        val body = json.encodeToString(
+            CancelFlowResponsePayload.serializer(),
+            payload
+        )
+        try {
+            httpClient.postVoid(
+                url = apiUrl("iap/cancel-flow/respond/"),
                 body = body,
                 headers = authHeaders,
             )

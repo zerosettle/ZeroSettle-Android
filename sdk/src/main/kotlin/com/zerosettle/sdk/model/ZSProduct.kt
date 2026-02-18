@@ -18,7 +18,7 @@ data class ZSProduct(
     val displayName: String,
     @SerialName("product_description")
     val productDescription: String,
-    val type: ZSProductType,
+    val type: ProductType,
     @SerialName("web_price")
     val webPrice: Price? = null,
     @SerialName("storekit_price")
@@ -73,27 +73,26 @@ data class ZSProduct(
             val percent = (savings * 100).toInt()
             return if (percent > 0) percent else null
         }
+
+    /**
+     * The type of in-app purchase product.
+     * String values match iOS raw values for backend compatibility.
+     */
+    @Serializable
+    enum class ProductType {
+        @SerialName("auto_renewable_subscription")
+        AUTO_RENEWABLE_SUBSCRIPTION,
+
+        @SerialName("non_renewing_subscription")
+        NON_RENEWING_SUBSCRIPTION,
+
+        @SerialName("consumable")
+        CONSUMABLE,
+
+        @SerialName("non_consumable")
+        NON_CONSUMABLE,
+    }
 }
-
-/**
- * The type of in-app purchase product.
- * String values match iOS raw values for backend compatibility.
- */
-@Serializable
-enum class ZSProductType {
-    @SerialName("auto_renewable_subscription")
-    AUTO_RENEWABLE_SUBSCRIPTION,
-
-    @SerialName("non_renewing_subscription")
-    NON_RENEWING_SUBSCRIPTION,
-
-    @SerialName("consumable")
-    CONSUMABLE,
-
-    @SerialName("non_consumable")
-    NON_CONSUMABLE,
-}
-
 /**
  * A price with currency information.
  */

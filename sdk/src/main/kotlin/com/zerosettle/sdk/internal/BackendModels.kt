@@ -105,3 +105,23 @@ internal data class PaymentIntentResponse(
 internal data class CustomerPortalSession(
     @SerialName("portal_url") val portalUrl: String,
 )
+
+// -- Cancel Flow --
+
+@Serializable
+internal data class CancelFlowResponsePayload(
+    @SerialName("user_id") val userId: String,
+    @SerialName("product_id") val productId: String,
+    val outcome: String,
+    @SerialName("offer_shown") val offerShown: Boolean,
+    @SerialName("offer_accepted") val offerAccepted: Boolean,
+    @SerialName("last_step_seen") val lastStepSeen: Int,
+    val answers: List<CancelFlowAnswerPayload>,
+)
+
+@Serializable
+internal data class CancelFlowAnswerPayload(
+    @SerialName("question_id") val questionId: Int,
+    @SerialName("selected_option_id") val selectedOptionId: Int? = null,
+    @SerialName("free_text") val freeText: String? = null,
+)

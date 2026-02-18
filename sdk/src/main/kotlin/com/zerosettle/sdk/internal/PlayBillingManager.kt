@@ -5,7 +5,6 @@ import android.content.Context
 import com.android.billingclient.api.*
 import com.zerosettle.sdk.core.ZSLogger
 import com.zerosettle.sdk.model.Entitlement
-import com.zerosettle.sdk.model.EntitlementSource
 import kotlinx.coroutines.*
 import java.time.Instant
 import kotlin.coroutines.resume
@@ -365,7 +364,7 @@ internal class PlayBillingManager(
             Entitlement(
                 id = "play_${purchase.orderId ?: purchase.purchaseToken.take(16)}",
                 productId = productId,
-                source = EntitlementSource.PLAY_STORE,
+                source = Entitlement.Source.PLAY_STORE,
                 isActive = true,
                 expiresAt = null,
                 purchasedAt = Instant.ofEpochMilli(purchase.purchaseTime).toString(),

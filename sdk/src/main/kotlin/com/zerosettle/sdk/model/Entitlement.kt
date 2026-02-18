@@ -11,27 +11,27 @@ data class Entitlement(
     val id: String,
     @SerialName("product_id")
     val productId: String,
-    val source: EntitlementSource = EntitlementSource.WEB_CHECKOUT,
+    val source: Source = Source.WEB_CHECKOUT,
     @SerialName("is_active")
     val isActive: Boolean,
     @SerialName("expires_at")
     val expiresAt: String? = null,
     @SerialName("purchased_at")
     val purchasedAt: String,
-)
+) {
+    /**
+     * The origin of a purchase/entitlement.
+     * String values match iOS raw values for backend compatibility.
+     */
+    @Serializable
+    enum class Source {
+        @SerialName("store_kit")
+        STORE_KIT,
 
-/**
- * The origin of a purchase/entitlement.
- * String values match iOS raw values for backend compatibility.
- */
-@Serializable
-enum class EntitlementSource {
-    @SerialName("store_kit")
-    STORE_KIT,
+        @SerialName("play_store")
+        PLAY_STORE,
 
-    @SerialName("play_store")
-    PLAY_STORE,
-
-    @SerialName("web_checkout")
-    WEB_CHECKOUT,
+        @SerialName("web_checkout")
+        WEB_CHECKOUT,
+    }
 }
