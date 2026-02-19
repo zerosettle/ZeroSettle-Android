@@ -92,6 +92,8 @@ data class MigrationPrompt(
     val discountPercent: Int,
     val title: String,
     val message: String,
+    @SerialName("cta_text")
+    val ctaText: String,
 )
 
 /**

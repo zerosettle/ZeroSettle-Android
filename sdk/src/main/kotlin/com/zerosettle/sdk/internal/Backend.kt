@@ -359,6 +359,7 @@ internal class Backend(
                     discountPercent = migrationResponse.discountPercent,
                     title = migrationResponse.title,
                     message = migrationResponse.message,
+                    ctaText = migrationResponse.ctaText ?: "Save ${migrationResponse.discountPercent}% Forever",
                 )
             } else {
                 null

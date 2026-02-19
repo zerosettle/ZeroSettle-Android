@@ -74,6 +74,7 @@ internal data class MigrationPromptResponse(
     @SerialName("discount_percent") val discountPercent: Int? = null,
     val title: String? = null,
     val message: String? = null,
+    @SerialName("cta_text") val ctaText: String? = null,
 )
 
 @Serializable
