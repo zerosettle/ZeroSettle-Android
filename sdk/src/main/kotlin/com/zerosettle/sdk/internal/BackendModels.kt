@@ -1,7 +1,7 @@
 package com.zerosettle.sdk.internal
 
 import com.zerosettle.sdk.model.Entitlement
-import com.zerosettle.sdk.model.ZSProduct
+import com.zerosettle.sdk.model.Product
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -44,7 +44,7 @@ internal data class SyncPlayStoreTransactionRequest(
 
 @Serializable
 internal data class ProductsResponse(
-    val products: List<ZSProduct>,
+    val products: List<Product>,
     val config: ConfigResponse? = null,
 )
 
@@ -116,6 +116,9 @@ internal data class CancelFlowResponsePayload(
     val outcome: String,
     @SerialName("offer_shown") val offerShown: Boolean,
     @SerialName("offer_accepted") val offerAccepted: Boolean,
+    @SerialName("pause_shown") val pauseShown: Boolean = false,
+    @SerialName("pause_accepted") val pauseAccepted: Boolean = false,
+    @SerialName("pause_duration_days") val pauseDurationDays: Int? = null,
     @SerialName("last_step_seen") val lastStepSeen: Int,
     val answers: List<CancelFlowAnswerPayload>,
 )
@@ -125,4 +128,47 @@ internal data class CancelFlowAnswerPayload(
     @SerialName("question_id") val questionId: Int,
     @SerialName("selected_option_id") val selectedOptionId: Int? = null,
     @SerialName("free_text") val freeText: String? = null,
+)
+
+// -- Subscription Management --
+
+@Serializable
+internal data class PauseSubscriptionRequest(
+    @SerialName("product_id") val productId: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("pause_option_id") val pauseOptionId: Int,
+)
+
+@Serializable
+internal data class PauseSubscriptionResponse(
+    @SerialName("resumes_at") val resumesAt: String? = null,
+)
+
+@Serializable
+internal data class ResumeSubscriptionRequest(
+    @SerialName("product_id") val productId: String,
+    @SerialName("user_id") val userId: String,
+)
+
+@Serializable
+internal data class CancelSubscriptionRequest(
+    @SerialName("product_id") val productId: String,
+    @SerialName("user_id") val userId: String,
+)
+
+// -- Upgrade Offer --
+
+@Serializable
+internal data class ExecuteUpgradeRequest(
+    @SerialName("current_product_id") val currentProductId: String,
+    @SerialName("target_product_id") val targetProductId: String,
+    @SerialName("user_id") val userId: String,
+)
+
+@Serializable
+internal data class UpgradeOfferRespondRequest(
+    @SerialName("user_id") val userId: String,
+    @SerialName("current_product_id") val currentProductId: String,
+    @SerialName("target_product_id") val targetProductId: String,
+    val outcome: String,
 )

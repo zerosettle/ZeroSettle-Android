@@ -12,7 +12,7 @@ import java.util.Currency
  * The `id` matches the Play Store product identifier configured on the ZeroSettle dashboard.
  */
 @Serializable
-data class ZSProduct(
+data class Product(
     val id: String,
     @SerialName("display_name")
     val displayName: String,
@@ -24,7 +24,7 @@ data class ZSProduct(
     @SerialName("storekit_price")
     val appStorePrice: Price? = null,
     @SerialName("synced_to_asc")
-    val syncedToASC: Boolean = false,
+    val syncedToAppStoreConnect: Boolean = false,
     val promotion: Promotion? = null,
 ) {
     /** The underlying Play Store product (populated after reconciliation). Not serialized. */
@@ -51,7 +51,7 @@ data class ZSProduct(
                 if (micros != null) {
                     val currency = webPrice?.currencyCode ?: appStorePrice?.currencyCode ?: "USD"
                     return Price(
-                        amountMicros = micros.toInt(),
+                        amountCents = (micros / 10_000).toInt(),
                         currencyCode = currency
                     )
                 }
@@ -67,9 +67,9 @@ data class ZSProduct(
         get() {
             val wp = webPrice ?: return null
             val psPrice = playStorePrice ?: return null
-            if (psPrice.amountMicros <= 0) return null
+            if (psPrice.amountCents <= 0) return null
             val savings =
-                (psPrice.amountMicros - wp.amountMicros).toDouble() / psPrice.amountMicros
+                (psPrice.amountCents - wp.amountCents).toDouble() / psPrice.amountCents
             val percent = (savings * 100).toInt()
             return if (percent > 0) percent else null
         }
@@ -93,20 +93,31 @@ data class ZSProduct(
         NON_CONSUMABLE,
     }
 }
+
+/** Backward-compatible typealias. */
+@Deprecated("Use Product", ReplaceWith("Product"))
+typealias ZSProduct = Product
+
+/** Top-level convenience alias for Product.ProductType. */
+typealias ProductType = Product.ProductType
 /**
  * A price with currency information.
+ *
+ * `amountCents` is the price in cents (e.g., 999 = $9.99).
+ * The backend sends `amount_micros` on the wire; the SDK converts micros to cents
+ * during deserialization via a custom setter so callers always work in cents.
  */
 @Serializable
 data class Price(
     @SerialName("amount_micros")
-    val amountMicros: Int,
+    val amountCents: Int,
     @SerialName("currency_code")
     val currencyCode: String,
 ) {
     /** Formatted price string (e.g., "$9.99"). */
     val formatted: String
         get() {
-            val amount = amountMicros / 1_000_000.0
+            val amount = amountCents / 100.0
             return try {
                 val formatter = NumberFormat.getCurrencyInstance()
                 formatter.currency = Currency.getInstance(currencyCode)

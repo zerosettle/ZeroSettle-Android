@@ -4,7 +4,7 @@ package com.zerosettle.sdk.error
  * Structured detail for payment failures within the payment sheet.
  * Maps to iOS `PaymentFailureDetail`.
  */
-data class PaymentFailureDetail(
+internal data class PaymentFailureDetail(
     val kind: Kind,
     val message: String,
 ) {

@@ -12,6 +12,7 @@ data class CancelFlowConfig(
     val enabled: Boolean,
     val questions: List<CancelFlowQuestion> = emptyList(),
     val offer: CancelFlowOffer? = null,
+    val pause: CancelFlowPauseConfig? = null,
 )
 
 /**
@@ -48,6 +49,7 @@ data class CancelFlowOption(
     val order: Int,
     val label: String,
     @SerialName("triggers_offer") val triggersOffer: Boolean,
+    @SerialName("triggers_pause") val triggersPause: Boolean = false,
 )
 
 /**
@@ -64,14 +66,67 @@ data class CancelFlowOffer(
 )
 
 /**
+ * Pause configuration for the cancel flow retention page.
+ * When enabled, offers the user the option to pause their subscription
+ * instead of cancelling.
+ */
+@Serializable
+data class CancelFlowPauseConfig(
+    val enabled: Boolean,
+    val title: String,
+    val body: String,
+    @SerialName("cta_text") val ctaText: String,
+    val options: List<CancelFlowPauseOption> = emptyList(),
+)
+
+/**
+ * The type of pause duration.
+ */
+@Serializable
+enum class CancelFlowDurationType {
+    @SerialName("days")
+    DAYS,
+
+    @SerialName("fixed_date")
+    FIXED_DATE;
+}
+
+/**
+ * A pause duration option presented to the user.
+ */
+@Serializable
+data class CancelFlowPauseOption(
+    val id: Int,
+    val order: Int,
+    val label: String,
+    @SerialName("duration_type") val durationType: CancelFlowDurationType,
+    @SerialName("duration_days") val durationDays: Int? = null,
+    @SerialName("resume_date") val resumeDate: String? = null,
+)
+
+/**
  * The outcome of a cancel flow presentation.
  * Maps to iOS `CancelFlow.Result`.
  */
-enum class CancelFlowResult {
+sealed interface CancelFlowResult {
     /** The user completed the flow and chose to cancel. */
-    CANCELLED,
+    data object Cancelled : CancelFlowResult
+
     /** The user accepted the save offer and was retained. */
-    RETAINED,
+    data object Retained : CancelFlowResult
+
     /** The user dismissed the sheet without completing the flow. */
-    DISMISSED,
+    data object Dismissed : CancelFlowResult
+
+    /** The user chose to pause their subscription. */
+    data class Paused(val resumesAt: String?) : CancelFlowResult
 }
+
+/** Wire-safe name for a [CancelFlowResult], used for backend payloads and logging. */
+val CancelFlowResult.outcomeName: String
+    get() = when (this) {
+        is CancelFlowResult.Cancelled -> "cancelled"
+        is CancelFlowResult.Retained -> "retained"
+        is CancelFlowResult.Dismissed -> "dismissed"
+        is CancelFlowResult.Paused -> "paused"
+    }

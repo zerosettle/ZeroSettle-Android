@@ -1,7 +1,7 @@
 package com.zerosettle.sdk
 
 import com.zerosettle.sdk.model.Entitlement
-import com.zerosettle.sdk.model.ZSTransaction
+import com.zerosettle.sdk.model.CheckoutTransaction
 
 /**
  * Delegate interface to receive callbacks for ZeroSettle IAP events.
@@ -16,7 +16,7 @@ interface ZeroSettleDelegate {
     fun zeroSettleCheckoutDidBegin(productId: String) {}
 
     /** Called when a web checkout completes successfully. */
-    fun zeroSettleCheckoutDidComplete(transaction: ZSTransaction) {}
+    fun zeroSettleCheckoutDidComplete(transaction: CheckoutTransaction) {}
 
     /** Called when the user cancels the web checkout (returns without purchasing). */
     fun zeroSettleCheckoutDidCancel(productId: String) {}

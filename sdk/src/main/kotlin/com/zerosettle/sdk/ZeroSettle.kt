@@ -43,8 +43,8 @@ object ZeroSettle : PlayBillingUpdateDelegate {
     private val _isConfigured = MutableStateFlow(false)
     val isConfigured: StateFlow<Boolean> = _isConfigured.asStateFlow()
 
-    private val _products = MutableStateFlow<List<ZSProduct>>(emptyList())
-    val products: StateFlow<List<ZSProduct>> = _products.asStateFlow()
+    private val _products = MutableStateFlow<List<Product>>(emptyList())
+    val products: StateFlow<List<Product>> = _products.asStateFlow()
 
     private val _entitlements = MutableStateFlow<List<Entitlement>>(emptyList())
     val entitlements: StateFlow<List<Entitlement>> = _entitlements.asStateFlow()
@@ -114,11 +114,14 @@ object ZeroSettle : PlayBillingUpdateDelegate {
     private var appContext: Context? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    /** Used by ZSPaymentSheetActivity to deliver results back to the suspend purchase() call. */
-    internal var paymentSheetDeferred: CompletableDeferred<ZSTransaction>? = null
+    /** Used by CheckoutSheetActivity to deliver results back to the suspend purchase() call. */
+    internal var paymentSheetDeferred: CompletableDeferred<CheckoutTransaction>? = null
 
-    /** Used by ZSCancelFlowActivity to deliver results back to the suspend presentCancelFlow() call. */
+    /** Used by CancelFlowActivity to deliver results back to the suspend presentCancelFlow() call. */
     internal var cancelFlowDeferred: CompletableDeferred<CancelFlowResult>? = null
+
+    /** Used by UpgradeOfferActivity to deliver results back to the suspend presentUpgradeOffer() call. */
+    internal var upgradeOfferDeferred: CompletableDeferred<UpgradeOfferResult>? = null
 
     // -- Configuration --
 
@@ -173,7 +176,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
      * Also reconciles with Play Store products for native purchasing support.
      */
     suspend fun fetchProducts(userId: String? = null): ProductCatalog {
-        val backend = this.backend ?: throw ZSError.NotConfigured
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
 
         try {
             val catalog = backend.fetchProducts(userId = userId)
@@ -246,25 +249,25 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         activity: Activity,
         productId: String,
         userId: String? = null,
-    ): ZSTransaction {
-        val checkoutFlow = this.checkoutFlow ?: throw ZSError.NotConfigured
-        val backend = this.backend ?: throw ZSError.NotConfigured
+    ): CheckoutTransaction {
+        val checkoutFlow = this.checkoutFlow ?: throw ZeroSettleError.NotConfigured
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
 
         // Subscriptions and non-consumables require a userId
         if (userId == null) {
             val product = _products.value.firstOrNull { it.id == productId }
-            if (product != null && (product.type == ZSProduct.ProductType.AUTO_RENEWABLE_SUBSCRIPTION ||
-                    product.type == ZSProduct.ProductType.NON_RENEWING_SUBSCRIPTION ||
-                    product.type == ZSProduct.ProductType.NON_CONSUMABLE)
+            if (product != null && (product.type == Product.ProductType.AUTO_RENEWABLE_SUBSCRIPTION ||
+                    product.type == Product.ProductType.NON_RENEWING_SUBSCRIPTION ||
+                    product.type == Product.ProductType.NON_CONSUMABLE)
             ) {
-                throw ZSError.UserIdRequired(productId)
+                throw ZeroSettleError.UserIdRequired(productId)
             }
         }
 
         // Check jurisdiction
         if (!isWebCheckoutEnabled) {
             val jurisdiction = _detectedJurisdiction.value ?: Jurisdiction.ROW
-            throw ZSError.WebCheckoutDisabledForJurisdiction(jurisdiction)
+            throw ZeroSettleError.WebCheckoutDisabledForJurisdiction(jurisdiction)
         }
 
         // Update Play Billing manager with user ID
@@ -277,8 +280,8 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         delegate?.zeroSettleCheckoutDidBegin(productId = productId)
 
         try {
-            // WEBVIEW path: launch ZSPaymentSheetActivity and await its result
-            if (checkoutType == CheckoutType.WEBVIEW) {
+            // WEB_VIEW / NATIVE_PAY path: launch CheckoutSheetActivity and await its result
+            if (checkoutType == CheckoutType.WEB_VIEW || checkoutType == CheckoutType.NATIVE_PAY) {
                 return purchaseViaPaymentSheet(activity, backend, productId, userId)
             }
 
@@ -301,7 +304,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
                 session.transactionId?.let { txnId ->
                     return backend.getTransaction(txnId)
                 }
-                throw ZSError.Cancelled
+                throw ZeroSettleError.Cancelled
             }
 
             // Deep link didn't fire — verify via polling
@@ -309,7 +312,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             if (transactionId == null) {
                 _pendingCheckout.value = false
                 delegate?.zeroSettleCheckoutDidCancel(productId = productId)
-                throw ZSError.Cancelled
+                throw ZeroSettleError.Cancelled
             }
 
             try {
@@ -327,21 +330,21 @@ object ZeroSettle : PlayBillingUpdateDelegate {
                 when (sheetError) {
                     is PaymentSheetError.Cancelled -> {
                         delegate?.zeroSettleCheckoutDidCancel(productId = productId)
-                        throw ZSError.Cancelled
+                        throw ZeroSettleError.Cancelled
                     }
                     is PaymentSheetError.VerificationFailed -> {
                         delegate?.zeroSettleCheckoutDidFail(productId, sheetError)
-                        throw ZSError.TransactionVerificationFailed(sheetError.detail)
+                        throw ZeroSettleError.TransactionVerificationFailed(sheetError.detail)
                     }
                     else -> {
                         delegate?.zeroSettleCheckoutDidFail(productId, sheetError)
-                        throw ZSError.CheckoutFailed(
+                        throw ZeroSettleError.CheckoutFailed(
                             CheckoutFailure.Other(sheetError.message ?: "Unknown error")
                         )
                     }
                 }
             }
-        } catch (e: ZSError) {
+        } catch (e: ZeroSettleError) {
             _pendingCheckout.value = false
             throw e
         } catch (e: Exception) {
@@ -350,12 +353,12 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             delegate?.zeroSettleCheckoutDidFail(productId, e)
 
             val reason = classifyCheckoutFailure(e)
-            throw ZSError.CheckoutFailed(reason)
+            throw ZeroSettleError.CheckoutFailed(reason)
         }
     }
 
     /**
-     * WEBVIEW checkout: creates a checkout session, launches ZSPaymentSheetActivity,
+     * WEB_VIEW checkout: creates a checkout session, launches CheckoutSheetActivity,
      * and suspends until the activity delivers a result via [paymentSheetDeferred].
      */
     private suspend fun purchaseViaPaymentSheet(
@@ -363,7 +366,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         backend: Backend,
         productId: String,
         userId: String?,
-    ): ZSTransaction {
+    ): CheckoutTransaction {
         val paymentIntent = backend.createPaymentIntent(
             productId = productId,
             userId = userId,
@@ -375,10 +378,10 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             ZSLogger.Category.IAP
         )
 
-        val deferred = CompletableDeferred<ZSTransaction>()
+        val deferred = CompletableDeferred<CheckoutTransaction>()
         paymentSheetDeferred = deferred
 
-        val intent = com.zerosettle.sdk.ui.ZSPaymentSheetActivity.createIntent(
+        val intent = com.zerosettle.sdk.ui.CheckoutSheetActivity.createIntent(
             context = activity,
             productId = productId,
             userId = userId,
@@ -396,11 +399,11 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         } catch (e: PaymentSheetError.Cancelled) {
             _pendingCheckout.value = false
             delegate?.zeroSettleCheckoutDidCancel(productId = productId)
-            throw ZSError.Cancelled
+            throw ZeroSettleError.Cancelled
         } catch (e: PaymentSheetError) {
             _pendingCheckout.value = false
             delegate?.zeroSettleCheckoutDidFail(productId, e)
-            throw ZSError.CheckoutFailed(
+            throw ZeroSettleError.CheckoutFailed(
                 CheckoutFailure.Other(e.message ?: "Payment sheet error")
             )
         } catch (e: Exception) {
@@ -416,23 +419,23 @@ object ZeroSettle : PlayBillingUpdateDelegate {
 
     /**
      * Purchase a product via Google Play Billing.
-     * Use this for products synced to Play Console where [ZSProduct.playStoreAvailable] is true.
+     * Use this for products synced to Play Console where [Product.playStoreAvailable] is true.
      */
     suspend fun purchaseViaPlayStore(
         activity: Activity,
         productId: String,
         userId: String? = null,
     ) {
-        val manager = playBillingManager ?: throw ZSError.NotConfigured
+        val manager = playBillingManager ?: throw ZeroSettleError.NotConfigured
 
         val product = _products.value.firstOrNull { it.id == productId }
-            ?: throw ZSError.ProductNotFound(productId)
+            ?: throw ZeroSettleError.ProductNotFound(productId)
 
-        if (userId == null && (product.type == ZSProduct.ProductType.AUTO_RENEWABLE_SUBSCRIPTION ||
-                product.type == ZSProduct.ProductType.NON_RENEWING_SUBSCRIPTION ||
-                product.type == ZSProduct.ProductType.NON_CONSUMABLE)
+        if (userId == null && (product.type == Product.ProductType.AUTO_RENEWABLE_SUBSCRIPTION ||
+                product.type == Product.ProductType.NON_RENEWING_SUBSCRIPTION ||
+                product.type == Product.ProductType.NON_CONSUMABLE)
         ) {
-            throw ZSError.UserIdRequired(productId)
+            throw ZeroSettleError.UserIdRequired(productId)
         }
 
         val playProduct = product.playStoreProduct
@@ -451,7 +454,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
      *
      * Fetches the cancel flow configuration from the backend, then presents
      * a native bottom sheet with the questionnaire. If the flow is disabled
-     * or has no questions, returns [CancelFlowResult.CANCELLED] immediately.
+     * or has no questions, returns [CancelFlowResult.Cancelled] immediately.
      *
      * @param activity Required for launching the cancel flow activity
      * @param productId The product the user wants to cancel
@@ -464,7 +467,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
     ): CancelFlowResult {
         val backend = this.backend ?: run {
             ZSLogger.error("presentCancelFlow called but SDK not configured", ZSLogger.Category.IAP)
-            return CancelFlowResult.CANCELLED
+            return CancelFlowResult.Cancelled
         }
 
         val config: CancelFlowConfig
@@ -472,12 +475,12 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             config = backend.fetchCancelFlow()
         } catch (e: Exception) {
             ZSLogger.error("Failed to fetch cancel flow config: $e", ZSLogger.Category.IAP)
-            return CancelFlowResult.CANCELLED
+            return CancelFlowResult.Cancelled
         }
 
         if (!config.enabled || config.questions.isEmpty()) {
-            ZSLogger.info("Cancel flow disabled or no questions, returning CANCELLED", ZSLogger.Category.IAP)
-            return CancelFlowResult.CANCELLED
+            ZSLogger.info("Cancel flow disabled or no questions, returning Cancelled", ZSLogger.Category.IAP)
+            return CancelFlowResult.Cancelled
         }
 
         val configJson = kotlinx.serialization.json.Json {
@@ -489,7 +492,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         val deferred = CompletableDeferred<CancelFlowResult>()
         cancelFlowDeferred = deferred
 
-        val intent = com.zerosettle.sdk.ui.ZSCancelFlowActivity.createIntent(
+        val intent = com.zerosettle.sdk.ui.CancelFlowActivity.createIntent(
             context = activity,
             configJson = configJson,
             productId = productId,
@@ -500,23 +503,25 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         val result = try {
             deferred.await()
         } catch (e: Exception) {
-            CancelFlowResult.DISMISSED
+            CancelFlowResult.Dismissed
         } finally {
             cancelFlowDeferred = null
         }
 
         // Fire-and-forget: submit response to backend
-        // Note: The activity collects answers but for simplicity we submit outcome here.
-        // A more complete implementation would pass answers back via the deferred.
         scope.launch {
             try {
+                val isPaused = result is CancelFlowResult.Paused
                 backend.submitCancelFlowResponse(
                     CancelFlowResponsePayload(
                         userId = userId,
                         productId = productId,
-                        outcome = result.name.lowercase(),
+                        outcome = result.outcomeName,
                         offerShown = false,
-                        offerAccepted = result == CancelFlowResult.RETAINED,
+                        offerAccepted = result is CancelFlowResult.Retained,
+                        pauseShown = isPaused,
+                        pauseAccepted = isPaused,
+                        pauseDurationDays = null,
                         lastStepSeen = 0,
                         answers = emptyList(),
                     )
@@ -527,8 +532,198 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             }
         }
 
-        ZSLogger.info("Cancel flow completed with result: ${result.name}", ZSLogger.Category.IAP)
+        ZSLogger.info("Cancel flow completed with result: ${result.outcomeName}", ZSLogger.Category.IAP)
         return result
+    }
+
+    // -- Headless Subscription Management --
+
+    /**
+     * Fetch the cancel flow configuration without presenting UI.
+     * Useful for building custom cancel flow experiences.
+     */
+    suspend fun fetchCancelFlowConfig(): CancelFlowConfig {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        return try {
+            backend.fetchCancelFlow()
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to fetch cancel flow config: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
+    }
+
+    /**
+     * Pause a subscription for the given user.
+     *
+     * @param productId The product identifier of the subscription to pause
+     * @param userId Your app's user identifier
+     * @param pauseOptionId The ID of the selected pause duration option
+     * @return The ISO 8601 date when the subscription will resume, or null
+     */
+    suspend fun pauseSubscription(productId: String, userId: String, pauseOptionId: Int): String? {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        return try {
+            val response = backend.pauseSubscription(productId, userId, pauseOptionId)
+            ZSLogger.info("Subscription paused for product=$productId, resumes at ${response.resumesAt}", ZSLogger.Category.IAP)
+            response.resumesAt
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to pause subscription: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
+    }
+
+    /**
+     * Resume a paused subscription for the given user.
+     *
+     * @param productId The product identifier of the subscription to resume
+     * @param userId Your app's user identifier
+     */
+    suspend fun resumeSubscription(productId: String, userId: String) {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        try {
+            backend.resumeSubscription(productId, userId)
+            ZSLogger.info("Subscription resumed for product=$productId", ZSLogger.Category.IAP)
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to resume subscription: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
+    }
+
+    /**
+     * Cancel a subscription for the given user (headless, no UI).
+     *
+     * @param productId The product identifier of the subscription to cancel
+     * @param userId Your app's user identifier
+     */
+    suspend fun cancelSubscription(productId: String, userId: String) {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        try {
+            backend.cancelSubscription(productId, userId)
+            ZSLogger.info("Subscription cancelled for product=$productId", ZSLogger.Category.IAP)
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to cancel subscription: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
+    }
+
+    // -- Upgrade Offer --
+
+    /**
+     * Present the upgrade offer sheet for a subscription upgrade.
+     *
+     * Fetches the upgrade offer configuration from the backend, then presents
+     * a native bottom sheet with the offer details. If no upgrade is available,
+     * returns [UpgradeOfferResult.Dismissed] immediately.
+     *
+     * @param activity Required for launching the upgrade offer activity
+     * @param productId Optional product to check upgrade for (backend may auto-detect)
+     * @param userId Your app's user identifier
+     */
+    suspend fun presentUpgradeOffer(
+        activity: Activity,
+        productId: String? = null,
+        userId: String,
+    ): UpgradeOfferResult {
+        val backend = this.backend ?: run {
+            ZSLogger.error("presentUpgradeOffer called but SDK not configured", ZSLogger.Category.IAP)
+            return UpgradeOfferResult.Dismissed
+        }
+
+        val config: UpgradeOfferConfig
+        try {
+            config = backend.fetchUpgradeOffer(userId = userId, productId = productId)
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to fetch upgrade offer config: $e", ZSLogger.Category.IAP)
+            return UpgradeOfferResult.Dismissed
+        }
+
+        if (!config.available || config.currentProduct == null || config.targetProduct == null) {
+            ZSLogger.info("Upgrade offer not available: ${config.reason ?: "unknown"}", ZSLogger.Category.IAP)
+            return UpgradeOfferResult.Dismissed
+        }
+
+        val configJson = kotlinx.serialization.json.Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+            encodeDefaults = true
+        }.encodeToString(UpgradeOfferConfig.serializer(), config)
+
+        val deferred = CompletableDeferred<UpgradeOfferResult>()
+        upgradeOfferDeferred = deferred
+
+        val intent = com.zerosettle.sdk.ui.UpgradeOfferActivity.createIntent(
+            context = activity,
+            configJson = configJson,
+            userId = userId,
+        )
+        activity.startActivity(intent)
+
+        val result = try {
+            deferred.await()
+        } catch (e: Exception) {
+            UpgradeOfferResult.Dismissed
+        } finally {
+            upgradeOfferDeferred = null
+        }
+
+        // Fire-and-forget: submit response to backend
+        scope.launch {
+            try {
+                backend.respondUpgradeOffer(
+                    userId = userId,
+                    currentProductId = config.currentProduct.referenceId,
+                    targetProductId = config.targetProduct.referenceId,
+                    outcome = result.outcomeName,
+                )
+                ZSLogger.debug("Upgrade offer response submitted", ZSLogger.Category.IAP)
+            } catch (e: Exception) {
+                ZSLogger.error("Failed to submit upgrade offer response: $e", ZSLogger.Category.IAP)
+            }
+        }
+
+        ZSLogger.info("Upgrade offer completed with result: ${result.outcomeName}", ZSLogger.Category.IAP)
+        return result
+    }
+
+    /**
+     * Fetch the upgrade offer configuration without presenting UI.
+     * Useful for checking availability or building custom upgrade offer experiences.
+     *
+     * @param productId Optional product to check upgrade for
+     * @param userId Your app's user identifier
+     */
+    suspend fun fetchUpgradeOffer(productId: String? = null, userId: String): UpgradeOfferConfig {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        return try {
+            backend.fetchUpgradeOffer(userId = userId, productId = productId)
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to fetch upgrade offer config: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
+    }
+
+    /**
+     * Execute a subscription upgrade (headless, no UI).
+     *
+     * @param currentProductId The product the user is upgrading from
+     * @param targetProductId The product the user is upgrading to
+     * @param userId Your app's user identifier
+     * @return The raw JSON response from the backend
+     */
+    suspend fun executeUpgrade(currentProductId: String, targetProductId: String, userId: String): JsonObject {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        return try {
+            val response = backend.executeUpgrade(
+                currentProductId = currentProductId,
+                targetProductId = targetProductId,
+                userId = userId,
+            )
+            ZSLogger.info("Upgrade executed: $currentProductId -> $targetProductId", ZSLogger.Category.IAP)
+            response
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to execute upgrade: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
     }
 
     // -- Migration Tracking --
@@ -537,7 +732,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
      * Track a successful migration conversion.
      */
     suspend fun trackMigrationConversion(userId: String) {
-        val backend = this.backend ?: throw ZSError.NotConfigured
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
         try {
             backend.trackMigrationConversion(userId = userId)
             ZSLogger.info("Migration conversion tracked for user: $userId", ZSLogger.Category.IAP)
@@ -553,8 +748,8 @@ object ZeroSettle : PlayBillingUpdateDelegate {
      * Open the Stripe customer portal for subscription management.
      */
     suspend fun openCustomerPortal(activity: Activity, userId: String) {
-        val backend = this.backend ?: throw ZSError.NotConfigured
-        val portalFlow = customerPortalFlow ?: throw ZSError.NotConfigured
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        val portalFlow = customerPortalFlow ?: throw ZeroSettleError.NotConfigured
 
         try {
             val session = backend.createCustomerPortalSession(userId = userId)
@@ -648,7 +843,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
                 "[restoreEntitlements] SDK not configured, throwing notConfigured",
                 ZSLogger.Category.IAP
             )
-            throw ZSError.NotConfigured
+            throw ZeroSettleError.NotConfigured
         }
 
         playBillingManager?.setUserId(userId)
@@ -685,7 +880,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         } catch (e: Exception) {
             ZSLogger.error("[restoreEntitlements] Failed to fetch web entitlements: $e", ZSLogger.Category.IAP)
             updateEntitlements(allEntitlements)
-            throw ZSError.RestoreEntitlementsFailed(
+            throw ZeroSettleError.RestoreEntitlementsFailed(
                 partialEntitlements = allEntitlements,
                 underlyingError = e,
             )
@@ -760,10 +955,10 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         try {
             val transaction = backend.getTransaction(transactionId = callback.transactionId)
 
-            if (transaction.status != ZSTransaction.Status.COMPLETED &&
-                transaction.status != ZSTransaction.Status.PROCESSING
+            if (transaction.status != CheckoutTransaction.Status.COMPLETED &&
+                transaction.status != CheckoutTransaction.Status.PROCESSING
             ) {
-                val error = ZSError.TransactionVerificationFailed(
+                val error = ZeroSettleError.TransactionVerificationFailed(
                     "Transaction status: ${transaction.status.name.lowercase()}"
                 )
                 delegate?.zeroSettleCheckoutDidFail(callback.productId, error)
@@ -771,7 +966,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             }
 
             ZSLogger.info(
-                "Checkout ${if (transaction.status == ZSTransaction.Status.PROCESSING) "processing" else "completed"}: ${transaction.id} for ${transaction.productId}",
+                "Checkout ${if (transaction.status == CheckoutTransaction.Status.PROCESSING) "processing" else "completed"}: ${transaction.id} for ${transaction.productId}",
                 ZSLogger.Category.IAP
             )
             delegate?.zeroSettleCheckoutDidComplete(transaction = transaction)
@@ -780,12 +975,12 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             ZSLogger.error("Transaction verification failed: $e", ZSLogger.Category.IAP)
             delegate?.zeroSettleCheckoutDidFail(
                 callback.productId,
-                ZSError.TransactionVerificationFailed(e.message ?: "Unknown error")
+                ZeroSettleError.TransactionVerificationFailed(e.message ?: "Unknown error")
             )
         }
     }
 
-    private suspend fun refreshEntitlementsAfterCheckout(transaction: ZSTransaction) {
+    private suspend fun refreshEntitlementsAfterCheckout(transaction: CheckoutTransaction) {
         val backend = this.backend ?: return
 
         val userId = playBillingManager?.currentUserId
@@ -807,10 +1002,10 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         }
     }
 
-    private fun appendLocalEntitlement(transaction: ZSTransaction) {
+    private fun appendLocalEntitlement(transaction: CheckoutTransaction) {
         // Only create local entitlements for transactions that actually completed
-        if (transaction.status != ZSTransaction.Status.COMPLETED &&
-            transaction.status != ZSTransaction.Status.PROCESSING
+        if (transaction.status != CheckoutTransaction.Status.COMPLETED &&
+            transaction.status != CheckoutTransaction.Status.PROCESSING
         ) {
             ZSLogger.warn(
                 "Skipping local entitlement for transaction ${transaction.id} with status ${transaction.status}",

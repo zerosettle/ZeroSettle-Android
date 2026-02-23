@@ -58,7 +58,8 @@ internal class WebCheckoutFlow(
                 ZSLogger.debug("Opening checkout URL in Chrome Custom Tab", ZSLogger.Category.IAP)
                 openInCustomTab(activity, session.checkoutUrl)
             }
-            com.zerosettle.sdk.model.CheckoutType.WEBVIEW -> {
+            com.zerosettle.sdk.model.CheckoutType.WEB_VIEW,
+            com.zerosettle.sdk.model.CheckoutType.NATIVE_PAY -> {
                 ZSLogger.debug(
                     "WebView checkout — session created but not opening browser",
                     ZSLogger.Category.IAP

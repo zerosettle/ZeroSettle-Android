@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -354,6 +355,30 @@ fun SettingsScreen(
                         scope.launch {
                             try {
                                 appState.manageSubscription()
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar("Error: ${e.message}")
+                            }
+                        }
+                    },
+                )
+
+                ActionButton(
+                    text = "Cancel Subscription",
+                    icon = Icons.Filled.Close,
+                    color = Color(0xFFE53935),
+                    onClick = {
+                        scope.launch {
+                            try {
+                                val activeEntitlement = appState.entitlements.firstOrNull {
+                                    it.isActive && it.expiresAt != null
+                                }
+                                val productId = activeEntitlement?.productId
+                                    ?: appState.products.firstOrNull()?.id
+                                    ?: return@launch run {
+                                        snackbarHostState.showSnackbar("No product to cancel")
+                                    }
+                                val result = appState.cancelSubscription(productId)
+                                snackbarHostState.showSnackbar("Cancel flow result: ${result.name}")
                             } catch (e: Exception) {
                                 snackbarHostState.showSnackbar("Error: ${e.message}")
                             }

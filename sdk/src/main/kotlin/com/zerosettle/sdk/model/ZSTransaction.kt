@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
  * Represents a completed or pending purchase transaction.
  */
 @Serializable
-data class ZSTransaction(
+data class CheckoutTransaction(
     val id: String,
     @SerialName("product_id")
     val productId: String,
@@ -40,3 +40,7 @@ data class ZSTransaction(
         REFUNDED,
     }
 }
+
+/** Backward-compatible typealias. */
+@Deprecated("Use CheckoutTransaction", ReplaceWith("CheckoutTransaction"))
+typealias ZSTransaction = CheckoutTransaction

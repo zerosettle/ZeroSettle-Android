@@ -9,13 +9,14 @@ import androidx.compose.runtime.setValue
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.ZeroSettleDelegate
 import com.zerosettle.sdk.model.Entitlement
-import com.zerosettle.sdk.model.ZSProduct
-import com.zerosettle.sdk.model.ZSTransaction
+import com.zerosettle.sdk.model.Product
+import com.zerosettle.sdk.model.CancelFlowResult
+import com.zerosettle.sdk.model.CheckoutTransaction
 
 class SampleAppState : ZeroSettleDelegate {
 
     var userId by mutableStateOf("sample_user_123")
-    var products = mutableStateListOf<ZSProduct>()
+    var products = mutableStateListOf<Product>()
     var entitlements = mutableStateListOf<Entitlement>()
     var isLoadingProducts by mutableStateOf(false)
     var productError by mutableStateOf<String?>(null)
@@ -131,13 +132,22 @@ class SampleAppState : ZeroSettleDelegate {
         ZeroSettle.showManageSubscription(activity = act, userId = userId)
     }
 
+    suspend fun cancelSubscription(productId: String): CancelFlowResult {
+        val act = activity ?: throw IllegalStateException("No activity")
+        return ZeroSettle.presentCancelFlow(
+            activity = act,
+            productId = productId,
+            userId = userId,
+        )
+    }
+
     // -- ZeroSettleDelegate --
 
     override fun zeroSettleCheckoutDidBegin(productId: String) {
         statusMessage = "Checkout started: $productId"
     }
 
-    override fun zeroSettleCheckoutDidComplete(transaction: ZSTransaction) {
+    override fun zeroSettleCheckoutDidComplete(transaction: CheckoutTransaction) {
         statusMessage = "Checkout complete: ${transaction.id}"
     }
 

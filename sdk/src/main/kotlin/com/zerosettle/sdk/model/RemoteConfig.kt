@@ -54,19 +54,23 @@ data class JurisdictionCheckoutConfig(
 @Serializable
 enum class CheckoutType {
     @SerialName("webview")
-    WEBVIEW,
+    WEB_VIEW,
 
     @SerialName("safari_vc")
     CUSTOM_TAB,
 
     @SerialName("safari")
-    EXTERNAL_BROWSER;
+    EXTERNAL_BROWSER,
+
+    @SerialName("native_pay")
+    NATIVE_PAY;
 
     companion object {
         fun fromWireValue(value: String): CheckoutType? = when (value) {
-            "webview" -> WEBVIEW
+            "webview" -> WEB_VIEW
             "safari_vc" -> CUSTOM_TAB
             "safari" -> EXTERNAL_BROWSER
+            "native_pay" -> NATIVE_PAY
             else -> null
         }
     }

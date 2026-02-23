@@ -32,7 +32,7 @@ import org.json.JSONObject
  * presented as a bottom sheet card over the calling activity.
  * Maps to iOS `ZSPaymentSheet` (the WebView path).
  */
-class ZSPaymentSheetActivity : Activity() {
+class CheckoutSheetActivity : Activity() {
 
     companion object {
         const val EXTRA_PRODUCT_ID = "com.zerosettle.sdk.PRODUCT_ID"
@@ -70,7 +70,7 @@ class ZSPaymentSheetActivity : Activity() {
             transactionId: String?,
             freeTrialDays: Int = 0,
         ): Intent {
-            return Intent(context, ZSPaymentSheetActivity::class.java).apply {
+            return Intent(context, CheckoutSheetActivity::class.java).apply {
                 putExtra(EXTRA_PRODUCT_ID, productId)
                 putExtra(EXTRA_USER_ID, userId)
                 putExtra(EXTRA_CHECKOUT_URL, checkoutUrl)

@@ -17,14 +17,17 @@ import android.widget.*
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.core.ZSLogger
 import com.zerosettle.sdk.model.*
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 
 /**
  * Activity that presents the cancel flow questionnaire as a bottom sheet card.
- * Uses Android Views (matching ZSPaymentSheetActivity pattern).
+ * Uses Android Views (matching CheckoutSheetActivity pattern).
  * Communicates result back via [ZeroSettle.cancelFlowDeferred].
+ *
+ * Flow: Questions -> Retention Page (offer + pause) -> Done
  */
-class ZSCancelFlowActivity : Activity() {
+class CancelFlowActivity : Activity() {
 
     companion object {
         const val EXTRA_CONFIG_JSON = "com.zerosettle.sdk.CANCEL_FLOW_CONFIG"
@@ -40,6 +43,7 @@ class ZSCancelFlowActivity : Activity() {
         private const val SCRIM_COLOR = 0x80000000.toInt()
         private const val ANIM_DURATION_MS = 350L
         private const val GREEN_COLOR = 0xFF4CAF50.toInt()
+        private const val BLUE_COLOR = 0xFF2196F3.toInt()
 
         private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -49,7 +53,7 @@ class ZSCancelFlowActivity : Activity() {
             productId: String,
             userId: String,
         ): Intent {
-            return Intent(context, ZSCancelFlowActivity::class.java).apply {
+            return Intent(context, CancelFlowActivity::class.java).apply {
                 putExtra(EXTRA_CONFIG_JSON, configJson)
                 putExtra(EXTRA_PRODUCT_ID, productId)
                 putExtra(EXTRA_USER_ID, userId)
@@ -73,10 +77,16 @@ class ZSCancelFlowActivity : Activity() {
     private val answers = mutableListOf<AnswerData>()
     private var selectedOptionId: Int? = null
     private var freeTextInput = ""
-    private var showingOffer = false
+    private var showingRetention = false
     private var offerShown = false
+    private var pauseShown = false
     private var lastStepSeen = 0
     private var earlyOfferTriggered = false
+
+    /** Currently selected pause option ID (on the retention page). */
+    private var selectedPauseOptionId: Int? = null
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private data class AnswerData(
         val questionId: Int,
@@ -84,14 +94,18 @@ class ZSCancelFlowActivity : Activity() {
         val freeText: String?,
     )
 
+    /** Whether the retention page has any content (offer or pause). */
+    private val hasRetentionPage: Boolean
+        get() = config.offer?.enabled == true || config.pause?.enabled == true
+
     private val totalSteps: Int
         get() {
-            val offerStep = if (config.offer?.enabled == true) 1 else 0
-            return config.questions.size + offerStep
+            val retentionStep = if (hasRetentionPage) 1 else 0
+            return config.questions.size + retentionStep
         }
 
     private val currentStep: Int
-        get() = if (showingOffer) config.questions.size else currentQuestionIndex
+        get() = if (showingRetention) config.questions.size else currentQuestionIndex
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,7 +115,7 @@ class ZSCancelFlowActivity : Activity() {
         userId = intent.getStringExtra(EXTRA_USER_ID) ?: ""
 
         if (configJson == null) {
-            finishWithResult(CancelFlowResult.DISMISSED)
+            finishWithResult(CancelFlowResult.Dismissed)
             return
         }
 
@@ -109,7 +123,7 @@ class ZSCancelFlowActivity : Activity() {
             config = json.decodeFromString(CancelFlowConfig.serializer(), configJson)
         } catch (e: Exception) {
             ZSLogger.error("Failed to parse cancel flow config: $e", ZSLogger.Category.IAP)
-            finishWithResult(CancelFlowResult.DISMISSED)
+            finishWithResult(CancelFlowResult.Dismissed)
             return
         }
 
@@ -134,7 +148,7 @@ class ZSCancelFlowActivity : Activity() {
             )
             setBackgroundColor(SCRIM_COLOR)
             alpha = 0f
-            setOnClickListener { finishWithResult(CancelFlowResult.DISMISSED) }
+            setOnClickListener { finishWithResult(CancelFlowResult.Dismissed) }
         }
         this.scrimView = scrim
         root.addView(scrim)
@@ -193,13 +207,13 @@ class ZSCancelFlowActivity : Activity() {
         }
 
         val closeButton = TextView(this).apply {
-            text = "✕"
+            text = "\u2715"
             textSize = 18f
             setTextColor(0xFF999999.toInt())
             gravity = Gravity.CENTER
             val size = (32 * density).toInt()
             layoutParams = FrameLayout.LayoutParams(size, size).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }
-            setOnClickListener { finishWithResult(CancelFlowResult.DISMISSED) }
+            setOnClickListener { finishWithResult(CancelFlowResult.Dismissed) }
         }
         header.addView(closeButton)
 
@@ -312,8 +326,8 @@ class ZSCancelFlowActivity : Activity() {
         contentContainer?.removeAllViews()
         updateDots()
 
-        if (showingOffer) {
-            renderOffer()
+        if (showingRetention) {
+            renderRetentionPage()
         } else if (currentQuestionIndex < config.questions.size) {
             renderQuestion(config.questions[currentQuestionIndex])
         }
@@ -447,10 +461,16 @@ class ZSCancelFlowActivity : Activity() {
         secondaryButton?.visibility = View.VISIBLE
     }
 
-    private fun renderOffer() {
+    /**
+     * Renders the retention page with offer section and/or pause section.
+     * The offer section is shown first (if enabled), followed by the pause section.
+     * The primary button accepts the offer; the pause CTA is inline in the pause section.
+     */
+    private fun renderRetentionPage() {
         val density = resources.displayMetrics.density
         val container = contentContainer ?: return
-        val offer = config.offer ?: return
+        val offer = config.offer?.takeIf { it.enabled }
+        val pause = config.pause?.takeIf { it.enabled && it.options.isNotEmpty() }
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -458,77 +478,228 @@ class ZSCancelFlowActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
             )
-            gravity = Gravity.CENTER_HORIZONTAL
         }
 
-        val topSpacer = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (40 * density).toInt(),
-            )
-        }
-        layout.addView(topSpacer)
+        // -- Offer section --
+        if (offer != null) {
+            offerShown = true
 
-        val icon = TextView(this).apply {
-            text = "🎁"
-            textSize = 44f
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        }
-        layout.addView(icon)
+            val topSpacer = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (24 * density).toInt(),
+                )
+            }
+            layout.addView(topSpacer)
 
-        val spacer1 = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (20 * density).toInt(),
-            )
-        }
-        layout.addView(spacer1)
+            val icon = TextView(this).apply {
+                text = "\uD83C\uDF81"
+                textSize = 44f
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            layout.addView(icon)
 
-        val titleView = TextView(this).apply {
-            text = offer.title
-            textSize = 22f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.BLACK)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        }
-        layout.addView(titleView)
+            val spacer1 = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (16 * density).toInt(),
+                )
+            }
+            layout.addView(spacer1)
 
-        val spacer2 = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (12 * density).toInt(),
-            )
-        }
-        layout.addView(spacer2)
+            val titleView = TextView(this).apply {
+                text = offer.title
+                textSize = 22f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.BLACK)
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            layout.addView(titleView)
 
-        val bodyView = TextView(this).apply {
-            text = offer.body
-            textSize = 16f
-            setTextColor(0xFF666666.toInt())
-            gravity = Gravity.CENTER
-            maxLines = 10
-            ellipsize = TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
+            val spacer2 = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (8 * density).toInt(),
+                )
+            }
+            layout.addView(spacer2)
+
+            val bodyView = TextView(this).apply {
+                text = offer.body
+                textSize = 16f
+                setTextColor(0xFF666666.toInt())
+                gravity = Gravity.CENTER
+                maxLines = 10
+                ellipsize = TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            layout.addView(bodyView)
         }
-        layout.addView(bodyView)
+
+        // -- Pause section --
+        if (pause != null) {
+            pauseShown = true
+            selectedPauseOptionId = null
+
+            // Divider between offer and pause (if both present)
+            if (offer != null) {
+                val dividerSpacer = View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (24 * density).toInt(),
+                    )
+                }
+                layout.addView(dividerSpacer)
+
+                val divider = View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (1 * density).toInt(),
+                    )
+                    setBackgroundColor(0xFFE0E0E0.toInt())
+                }
+                layout.addView(divider)
+
+                val afterDivider = View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (24 * density).toInt(),
+                    )
+                }
+                layout.addView(afterDivider)
+            } else {
+                val topSpacer = View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (24 * density).toInt(),
+                    )
+                }
+                layout.addView(topSpacer)
+            }
+
+            val pauseTitle = TextView(this).apply {
+                text = pause.title
+                textSize = 20f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.BLACK)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            layout.addView(pauseTitle)
+
+            val pauseSpacer1 = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (8 * density).toInt(),
+                )
+            }
+            layout.addView(pauseSpacer1)
+
+            val pauseBody = TextView(this).apply {
+                text = pause.body
+                textSize = 15f
+                setTextColor(0xFF666666.toInt())
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+            }
+            layout.addView(pauseBody)
+
+            val pauseSpacer2 = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (12 * density).toInt(),
+                )
+            }
+            layout.addView(pauseSpacer2)
+
+            // Pause duration radio buttons
+            val pauseRadioGroup = RadioGroup(this).apply {
+                orientation = RadioGroup.VERTICAL
+                background = GradientDrawable().apply {
+                    setColor(0xFFF5F5F5.toInt())
+                    cornerRadius = 12 * density
+                }
+                val pad = (4 * density).toInt()
+                setPadding(pad, pad, pad, pad)
+            }
+
+            val sortedOptions = pause.options.sortedBy { it.order }
+            for (option in sortedOptions) {
+                val radio = RadioButton(this).apply {
+                    id = option.id
+                    text = option.label
+                    textSize = 16f
+                    setTextColor(Color.BLACK)
+                    val vertPad = (12 * density).toInt()
+                    val horizPad = (12 * density).toInt()
+                    setPadding(horizPad, vertPad, horizPad, vertPad)
+                }
+                pauseRadioGroup.addView(radio)
+            }
+
+            // Inline pause CTA button (below radio options)
+            val pauseCta = TextView(this).apply {
+                text = pause.ctaText
+                textSize = 15f
+                setTextColor(Color.WHITE)
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                val pad = (12 * density).toInt()
+                setPadding(0, pad, 0, pad)
+                background = GradientDrawable().apply {
+                    setColor(BLUE_COLOR)
+                    cornerRadius = 10 * density
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = (12 * density).toInt()
+                }
+                alpha = 0.4f
+                isClickable = false
+                setOnClickListener { onPauseTap() }
+            }
+
+            pauseRadioGroup.setOnCheckedChangeListener { _, checkedId ->
+                selectedPauseOptionId = checkedId
+                pauseCta.alpha = 1f
+                pauseCta.isClickable = true
+            }
+            layout.addView(pauseRadioGroup)
+            layout.addView(pauseCta)
+        }
 
         container.addView(layout)
 
-        primaryButton?.text = offer.ctaText
-        updatePrimaryEnabled(true)
-        secondaryButton?.text = "No thanks, cancel"
-        secondaryButton?.visibility = View.VISIBLE
+        // Configure bottom buttons for retention page
+        if (offer != null) {
+            primaryButton?.text = offer.ctaText
+            updatePrimaryEnabled(true)
+            secondaryButton?.text = "No thanks, cancel"
+            secondaryButton?.visibility = View.VISIBLE
+        } else {
+            // Pause only (no offer) — primary button is "Cancel subscription"
+            primaryButton?.text = "Cancel subscription"
+            (primaryButton?.background as? GradientDrawable)?.setColor(0xFFD32F2F.toInt())
+            updatePrimaryEnabled(true)
+            secondaryButton?.visibility = View.GONE
+        }
     }
 
     private fun updatePrimaryEnabled(enabled: Boolean) {
@@ -541,8 +712,15 @@ class ZSCancelFlowActivity : Activity() {
     // -- Button Handlers --
 
     private fun onPrimaryTap() {
-        if (showingOffer) {
-            finishWithResult(CancelFlowResult.RETAINED, offerAccepted = true)
+        if (showingRetention) {
+            val offer = config.offer?.takeIf { it.enabled }
+            if (offer != null) {
+                // Primary button on retention page = accept the offer
+                finishWithResult(CancelFlowResult.Retained)
+            } else {
+                // Pause-only retention page: primary = cancel subscription
+                finishWithResult(CancelFlowResult.Cancelled)
+            }
             return
         }
 
@@ -565,11 +743,10 @@ class ZSCancelFlowActivity : Activity() {
             val optionId = selectedOptionId
             if (optionId != null) {
                 val option = question.options.firstOrNull { it.id == optionId }
-                if (option?.triggersOffer == true && config.offer?.enabled == true) {
+                if ((option?.triggersOffer == true || option?.triggersPause == true) && hasRetentionPage) {
                     earlyOfferTriggered = true
-                    offerShown = true
                     lastStepSeen = config.questions.size
-                    showingOffer = true
+                    showingRetention = true
                     renderCurrentPage()
                     return
                 }
@@ -583,28 +760,57 @@ class ZSCancelFlowActivity : Activity() {
             lastStepSeen = maxOf(lastStepSeen, nextIndex)
             renderCurrentPage()
         } else {
-            if (config.offer?.enabled == true) {
-                offerShown = true
+            if (hasRetentionPage) {
                 lastStepSeen = config.questions.size
-                showingOffer = true
+                showingRetention = true
                 renderCurrentPage()
             } else {
-                finishWithResult(CancelFlowResult.CANCELLED)
+                finishWithResult(CancelFlowResult.Cancelled)
             }
         }
     }
 
     private fun onSecondaryTap() {
-        if (showingOffer) {
-            finishWithResult(CancelFlowResult.CANCELLED)
-        } else {
-            finishWithResult(CancelFlowResult.CANCELLED)
+        finishWithResult(CancelFlowResult.Cancelled)
+    }
+
+    /**
+     * Called when the user taps the pause CTA button on the retention page.
+     * Calls the backend to pause the subscription, then finishes with [CancelFlowResult.Paused].
+     */
+    private fun onPauseTap() {
+        val pauseOptionId = selectedPauseOptionId ?: return
+        val pauseOption = config.pause?.options?.firstOrNull { it.id == pauseOptionId }
+
+        // Disable the button to prevent double-taps
+        updatePrimaryEnabled(false)
+
+        scope.launch {
+            try {
+                val backend = ZeroSettle.effectiveBaseUrl?.let { baseUrl ->
+                    ZeroSettle.currentConfig?.let { config ->
+                        com.zerosettle.sdk.internal.Backend(baseUrl, config.publishableKey)
+                    }
+                }
+
+                var resumesAt: String? = pauseOption?.resumeDate
+                if (backend != null) {
+                    val response = backend.pauseSubscription(productId, userId, pauseOptionId)
+                    resumesAt = response.resumesAt ?: resumesAt
+                }
+
+                finishWithResult(CancelFlowResult.Paused(resumesAt = resumesAt))
+            } catch (e: Exception) {
+                ZSLogger.error("Failed to pause subscription: $e", ZSLogger.Category.IAP)
+                // On failure, still let the user know — finish with paused using local date
+                finishWithResult(CancelFlowResult.Paused(resumesAt = pauseOption?.resumeDate))
+            }
         }
     }
 
     // -- Results --
 
-    private fun finishWithResult(result: CancelFlowResult, offerAccepted: Boolean = false) {
+    private fun finishWithResult(result: CancelFlowResult) {
         if (hasCompleted) return
         hasCompleted = true
 
@@ -616,15 +822,16 @@ class ZSCancelFlowActivity : Activity() {
 
     override fun onDestroy() {
         if (!hasCompleted) {
-            ZeroSettle.cancelFlowDeferred?.complete(CancelFlowResult.DISMISSED)
+            ZeroSettle.cancelFlowDeferred?.complete(CancelFlowResult.Dismissed)
         }
+        scope.cancel()
         super.onDestroy()
     }
 
     @Deprecated("Use onBackPressedDispatcher", ReplaceWith("onBackPressedDispatcher"))
     override fun onBackPressed() {
         if (!hasCompleted) {
-            finishWithResult(CancelFlowResult.DISMISSED)
+            finishWithResult(CancelFlowResult.Dismissed)
             return
         }
         @Suppress("DEPRECATION")

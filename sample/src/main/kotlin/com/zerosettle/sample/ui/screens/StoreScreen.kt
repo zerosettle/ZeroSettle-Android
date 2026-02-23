@@ -62,8 +62,8 @@ import com.zerosettle.sample.ui.theme.Green
 import com.zerosettle.sample.ui.theme.Indigo
 import com.zerosettle.sample.ui.theme.Orange
 import com.zerosettle.sample.ui.theme.Purple
-import com.zerosettle.sdk.model.ZSProduct
-import com.zerosettle.sdk.model.ZSProductType
+import com.zerosettle.sdk.model.Product
+import com.zerosettle.sdk.model.ProductType
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,7 +75,7 @@ fun StoreScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var selectedProduct by remember { mutableStateOf<ZSProduct?>(null) }
+    var selectedProduct by remember { mutableStateOf<Product?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
     var processingMethod by remember { mutableStateOf<PaymentMethod?>(null) }
 
@@ -83,11 +83,11 @@ fun StoreScreen(
     val isLoading = appState.isLoadingProducts
     val errorMessage = appState.productError
 
-    val consumables = products.filter { it.type == ZSProductType.CONSUMABLE }
-    val nonConsumables = products.filter { it.type == ZSProductType.NON_CONSUMABLE }
+    val consumables = products.filter { it.type == ProductType.CONSUMABLE }
+    val nonConsumables = products.filter { it.type == ProductType.NON_CONSUMABLE }
     val subscriptions = products.filter {
-        it.type == ZSProductType.AUTO_RENEWABLE_SUBSCRIPTION ||
-            it.type == ZSProductType.NON_RENEWING_SUBSCRIPTION
+        it.type == ProductType.AUTO_RENEWABLE_SUBSCRIPTION ||
+            it.type == ProductType.NON_RENEWING_SUBSCRIPTION
     }
 
     // Background gradient matching StoreFront
@@ -288,9 +288,9 @@ private fun ProductSection(
     title: String,
     icon: ImageVector,
     iconColor: Color,
-    products: List<ZSProduct>,
+    products: List<Product>,
     selectedProductId: String?,
-    onProductSelected: (ZSProduct) -> Unit,
+    onProductSelected: (Product) -> Unit,
 ) {
     var consumableIndex = 0
     var subscriptionIndex = 0
@@ -316,7 +316,7 @@ private fun ProductSection(
 
         products.forEach { product ->
             val index = when (product.type) {
-                ZSProductType.CONSUMABLE, ZSProductType.NON_CONSUMABLE -> consumableIndex++
+                ProductType.CONSUMABLE, ProductType.NON_CONSUMABLE -> consumableIndex++
                 else -> subscriptionIndex++
             }
             val visuals = getProductVisuals(product, index)

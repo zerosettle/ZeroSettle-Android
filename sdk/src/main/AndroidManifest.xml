@@ -6,12 +6,17 @@
 
     <application>
         <activity
-            android:name="com.zerosettle.sdk.ui.ZSPaymentSheetActivity"
+            android:name="com.zerosettle.sdk.ui.CheckoutSheetActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
-            android:name="com.zerosettle.sdk.ui.ZSCancelFlowActivity"
+            android:name="com.zerosettle.sdk.ui.CancelFlowActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <activity
+            android:name="com.zerosettle.sdk.ui.UpgradeOfferActivity"
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>

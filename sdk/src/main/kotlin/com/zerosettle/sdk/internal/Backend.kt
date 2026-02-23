@@ -5,7 +5,7 @@ import com.zerosettle.sdk.core.HttpError
 import com.zerosettle.sdk.core.ZSLogger
 import com.zerosettle.sdk.error.APIErrorDetail
 import com.zerosettle.sdk.error.PaymentSheetError
-import com.zerosettle.sdk.error.ZSError
+import com.zerosettle.sdk.error.ZeroSettleError
 import com.zerosettle.sdk.model.*
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
@@ -99,12 +99,12 @@ internal class Backend(
 
     // -- Transactions --
 
-    suspend fun getTransaction(transactionId: String): ZSTransaction {
+    suspend fun getTransaction(transactionId: String): CheckoutTransaction {
         return try {
             httpClient.get(
                 url = apiUrl("iap/transactions/$transactionId/"),
                 headers = authHeaders,
-                deserializer = ZSTransaction.serializer(),
+                deserializer = CheckoutTransaction.serializer(),
             )
         } catch (e: Exception) {
             throw wrapError(e)
@@ -117,18 +117,18 @@ internal class Backend(
         transactionId: String,
         maxAttempts: Int = 6,
         pollIntervalMs: Long = 2_000,
-    ): ZSTransaction {
+    ): CheckoutTransaction {
         // Initial delay for webhook processing
         delay(1_500)
 
-        var lastTransaction: ZSTransaction? = null
+        var lastTransaction: CheckoutTransaction? = null
         for (attempt in 1..maxAttempts) {
             val transaction = getTransaction(transactionId)
             lastTransaction = transaction
 
             when (transaction.status) {
-                ZSTransaction.Status.COMPLETED -> return transaction
-                ZSTransaction.Status.PROCESSING -> {
+                CheckoutTransaction.Status.COMPLETED -> return transaction
+                CheckoutTransaction.Status.PROCESSING -> {
                     if (attempt < maxAttempts) {
                         delay(pollIntervalMs)
                         continue
@@ -248,13 +248,116 @@ internal class Backend(
         }
     }
 
+    // -- Subscription Management --
+
+    suspend fun pauseSubscription(productId: String, userId: String, pauseOptionId: Int): PauseSubscriptionResponse {
+        val body = json.encodeToString(
+            PauseSubscriptionRequest.serializer(),
+            PauseSubscriptionRequest(productId, userId, pauseOptionId)
+        )
+        return try {
+            httpClient.post(
+                url = apiUrl("iap/subscriptions/pause/"),
+                body = body,
+                headers = authHeaders,
+                deserializer = PauseSubscriptionResponse.serializer(),
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
+    suspend fun resumeSubscription(productId: String, userId: String) {
+        val body = json.encodeToString(
+            ResumeSubscriptionRequest.serializer(),
+            ResumeSubscriptionRequest(productId, userId)
+        )
+        try {
+            httpClient.postVoid(
+                url = apiUrl("iap/subscriptions/resume/"),
+                body = body,
+                headers = authHeaders,
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
+    suspend fun cancelSubscription(productId: String, userId: String) {
+        val body = json.encodeToString(
+            CancelSubscriptionRequest.serializer(),
+            CancelSubscriptionRequest(productId, userId)
+        )
+        try {
+            httpClient.postVoid(
+                url = apiUrl("iap/subscriptions/cancel/"),
+                body = body,
+                headers = authHeaders,
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
+    // -- Upgrade Offer --
+
+    suspend fun fetchUpgradeOffer(userId: String, productId: String? = null): UpgradeOfferConfig {
+        val urlBuilder = StringBuilder(apiUrl("iap/upgrade-offer/"))
+        urlBuilder.append("?user_id=$userId")
+        if (productId != null) {
+            urlBuilder.append("&product_id=$productId")
+        }
+        return try {
+            httpClient.get(
+                url = urlBuilder.toString(),
+                headers = authHeaders,
+                deserializer = UpgradeOfferConfig.serializer(),
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
+    suspend fun executeUpgrade(currentProductId: String, targetProductId: String, userId: String): JsonObject {
+        val body = json.encodeToString(
+            ExecuteUpgradeRequest.serializer(),
+            ExecuteUpgradeRequest(currentProductId, targetProductId, userId)
+        )
+        return try {
+            httpClient.post(
+                url = apiUrl("iap/upgrade-offer/execute/"),
+                body = body,
+                headers = authHeaders,
+                deserializer = JsonObject.serializer(),
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
+    suspend fun respondUpgradeOffer(userId: String, currentProductId: String, targetProductId: String, outcome: String) {
+        val body = json.encodeToString(
+            UpgradeOfferRespondRequest.serializer(),
+            UpgradeOfferRespondRequest(userId, currentProductId, targetProductId, outcome)
+        )
+        try {
+            httpClient.postVoid(
+                url = apiUrl("iap/upgrade-offer/respond/"),
+                body = body,
+                headers = authHeaders,
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
     // -- Error Wrapping --
 
     companion object {
-        fun wrapError(error: Throwable): ZSError {
-            if (error is ZSError) return error
+        fun wrapError(error: Throwable): ZeroSettleError {
+            if (error is ZeroSettleError) return error
             val detail = parseAPIErrorDetail(error)
-            return ZSError.ApiError(detail)
+            return ZeroSettleError.ApiError(detail)
         }
 
         private fun parseAPIErrorDetail(error: Throwable): APIErrorDetail {

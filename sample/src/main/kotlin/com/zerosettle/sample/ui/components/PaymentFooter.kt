@@ -36,13 +36,13 @@ import com.zerosettle.sample.ui.theme.Green
 import com.zerosettle.sample.ui.theme.Indigo
 import com.zerosettle.sample.ui.theme.IndigoDark
 import com.zerosettle.sample.ui.theme.Purple
-import com.zerosettle.sdk.model.ZSProduct
+import com.zerosettle.sdk.model.Product
 
 enum class PaymentMethod { PLAY_STORE, WEB_CHECKOUT }
 
 @Composable
 fun PaymentFooter(
-    selectedProduct: ZSProduct?,
+    selectedProduct: Product?,
     isProcessing: Boolean,
     processingMethod: PaymentMethod?,
     isWebCheckoutEnabled: Boolean,

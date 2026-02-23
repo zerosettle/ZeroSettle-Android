@@ -4,7 +4,7 @@ package com.zerosettle.sdk.error
  * Errors specific to the payment sheet UI.
  * Maps to iOS `PaymentSheetError`.
  */
-sealed class PaymentSheetError : Exception() {
+internal sealed class PaymentSheetError : Exception() {
     data object Cancelled : PaymentSheetError() {
         override val message: String get() = "Payment was cancelled"
     }

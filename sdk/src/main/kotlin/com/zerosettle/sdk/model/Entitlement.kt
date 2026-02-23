@@ -14,10 +14,15 @@ data class Entitlement(
     val source: Source = Source.WEB_CHECKOUT,
     @SerialName("is_active")
     val isActive: Boolean,
+    val status: String = "active",
     @SerialName("expires_at")
     val expiresAt: String? = null,
     @SerialName("purchased_at")
     val purchasedAt: String,
+    @SerialName("paused_at")
+    val pausedAt: String? = null,
+    @SerialName("pause_resumes_at")
+    val pauseResumesAt: String? = null,
 ) {
     /**
      * The origin of a purchase/entitlement.

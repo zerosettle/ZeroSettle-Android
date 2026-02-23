@@ -54,8 +54,8 @@ import com.zerosettle.sample.ui.theme.Mint
 import com.zerosettle.sample.ui.theme.Orange
 import com.zerosettle.sample.ui.theme.Purple
 import com.zerosettle.sample.ui.theme.Yellow
-import com.zerosettle.sdk.model.ZSProduct
-import com.zerosettle.sdk.model.ZSProductType
+import com.zerosettle.sdk.model.Product
+import com.zerosettle.sdk.model.ProductType
 
 data class ProductVisuals(
     val icon: ImageVector,
@@ -64,21 +64,21 @@ data class ProductVisuals(
     val features: List<String>,
 )
 
-fun getProductVisuals(product: ZSProduct, index: Int): ProductVisuals {
+fun getProductVisuals(product: Product, index: Int): ProductVisuals {
     return when (product.type) {
-        ZSProductType.CONSUMABLE -> ProductVisuals(
+        ProductType.CONSUMABLE -> ProductVisuals(
             icon = listOf(Icons.Filled.Diamond, Icons.Filled.Diamond, Icons.Filled.Star)[index % 3],
             accentColor = listOf(Cyan, Blue, Purple)[index % 3],
             badge = listOf(null, "Popular", "Best Value")[index % 3],
             features = listOf("Digital currency", "Never expires"),
         )
-        ZSProductType.NON_CONSUMABLE -> ProductVisuals(
+        ProductType.NON_CONSUMABLE -> ProductVisuals(
             icon = Icons.Filled.LockOpen,
             accentColor = Green,
             badge = null,
             features = listOf("Permanent unlock", "One-time purchase"),
         )
-        ZSProductType.AUTO_RENEWABLE_SUBSCRIPTION -> {
+        ProductType.AUTO_RENEWABLE_SUBSCRIPTION -> {
             val isYearly = product.id.contains("year", ignoreCase = true) ||
                 product.displayName.contains("year", ignoreCase = true)
             val isWeekly = product.id.contains("week", ignoreCase = true) ||
@@ -104,7 +104,7 @@ fun getProductVisuals(product: ZSProduct, index: Int): ProductVisuals {
                 )
             }
         }
-        ZSProductType.NON_RENEWING_SUBSCRIPTION -> ProductVisuals(
+        ProductType.NON_RENEWING_SUBSCRIPTION -> ProductVisuals(
             icon = Icons.Filled.ShoppingBag,
             accentColor = Orange,
             badge = null,
@@ -115,7 +115,7 @@ fun getProductVisuals(product: ZSProduct, index: Int): ProductVisuals {
 
 @Composable
 fun ProductCard(
-    product: ZSProduct,
+    product: Product,
     visuals: ProductVisuals,
     isSelected: Boolean,
     onClick: () -> Unit,
