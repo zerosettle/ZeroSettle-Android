@@ -130,3 +130,77 @@ val CancelFlowResult.outcomeName: String
         is CancelFlowResult.Dismissed -> "dismissed"
         is CancelFlowResult.Paused -> "paused"
     }
+
+// -- Headless Cancel Flow Types --
+
+/**
+ * Result returned after a save offer is successfully applied.
+ */
+data class CancelFlowSaveOfferResult(
+    /** Human-readable description of the applied offer (e.g., "40% off for 3 months"). */
+    val message: String,
+    /** Discount percentage, if the offer type is a percentage discount. */
+    val discountPercent: Int?,
+    /** Duration of the discount in months, if applicable. */
+    val durationMonths: Int?,
+)
+
+/**
+ * The outcome of a cancel flow for analytics tracking.
+ * Maps to iOS `CancelFlow.Outcome`.
+ */
+@Serializable
+enum class CancelFlowOutcome {
+    @SerialName("cancelled")
+    CANCELLED,
+
+    @SerialName("retained")
+    RETAINED,
+
+    @SerialName("paused")
+    PAUSED,
+
+    @SerialName("dismissed")
+    DISMISSED,
+}
+
+/**
+ * A single answer to a cancel flow question.
+ *
+ * For single-select questions, set [selectedOptionId].
+ * For free-text questions, set [freeText].
+ */
+data class CancelFlowAnswer(
+    /** The question ID this answer corresponds to. */
+    val questionId: Int,
+    /** The selected option ID (for single-select questions). */
+    val selectedOptionId: Int? = null,
+    /** The free text response (for free-text questions). */
+    val freeText: String? = null,
+)
+
+/**
+ * Analytics payload submitted after a cancel flow completes.
+ *
+ * Use with [ZeroSettle.submitCancelFlowResponse] when building custom cancel flow UI.
+ */
+data class CancelFlowResponse(
+    /** The product the user was cancelling. */
+    val productId: String,
+    /** Your app's user identifier. */
+    val userId: String,
+    /** The final outcome of the cancel flow. */
+    val outcome: CancelFlowOutcome,
+    /** The user's answers to questionnaire questions. */
+    val answers: List<CancelFlowAnswer> = emptyList(),
+    /** Whether the save offer was shown to the user. */
+    val offerShown: Boolean = false,
+    /** Whether the user accepted the save offer. */
+    val offerAccepted: Boolean = false,
+    /** Whether the pause option was shown to the user. */
+    val pauseShown: Boolean = false,
+    /** Whether the user accepted the pause option. */
+    val pauseAccepted: Boolean = false,
+    /** The selected pause duration in days (if pause was accepted). */
+    val pauseDurationDays: Int? = null,
+)

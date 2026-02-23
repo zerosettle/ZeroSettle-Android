@@ -130,6 +130,21 @@ internal data class CancelFlowAnswerPayload(
     @SerialName("free_text") val freeText: String? = null,
 )
 
+// -- Accept Save Offer --
+
+@Serializable
+internal data class AcceptSaveOfferRequest(
+    @SerialName("product_id") val productId: String,
+    @SerialName("user_id") val userId: String,
+)
+
+@Serializable
+internal data class AcceptSaveOfferResponse(
+    val message: String,
+    @SerialName("discount_percent") val discountPercent: Int? = null,
+    @SerialName("duration_months") val durationMonths: Int? = null,
+)
+
 // -- Subscription Management --
 
 @Serializable
@@ -154,6 +169,7 @@ internal data class ResumeSubscriptionRequest(
 internal data class CancelSubscriptionRequest(
     @SerialName("product_id") val productId: String,
     @SerialName("user_id") val userId: String,
+    val immediate: Boolean = false,
 )
 
 // -- Upgrade Offer --

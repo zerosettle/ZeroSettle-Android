@@ -248,6 +248,23 @@ internal class Backend(
         }
     }
 
+    suspend fun acceptSaveOffer(productId: String, userId: String): AcceptSaveOfferResponse {
+        val body = json.encodeToString(
+            AcceptSaveOfferRequest.serializer(),
+            AcceptSaveOfferRequest(productId, userId)
+        )
+        return try {
+            httpClient.post(
+                url = apiUrl("iap/cancel-flow/accept-offer/"),
+                body = body,
+                headers = authHeaders,
+                deserializer = AcceptSaveOfferResponse.serializer(),
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+    }
+
     // -- Subscription Management --
 
     suspend fun pauseSubscription(productId: String, userId: String, pauseOptionId: Int): PauseSubscriptionResponse {
@@ -283,10 +300,10 @@ internal class Backend(
         }
     }
 
-    suspend fun cancelSubscription(productId: String, userId: String) {
+    suspend fun cancelSubscription(productId: String, userId: String, immediate: Boolean = false) {
         val body = json.encodeToString(
             CancelSubscriptionRequest.serializer(),
-            CancelSubscriptionRequest(productId, userId)
+            CancelSubscriptionRequest(productId, userId, immediate)
         )
         try {
             httpClient.postVoid(

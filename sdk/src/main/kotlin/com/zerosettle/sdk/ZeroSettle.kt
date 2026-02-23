@@ -58,6 +58,9 @@ object ZeroSettle : PlayBillingUpdateDelegate {
     private val _detectedJurisdiction = MutableStateFlow<Jurisdiction?>(null)
     val detectedJurisdiction: StateFlow<Jurisdiction?> = _detectedJurisdiction.asStateFlow()
 
+    private val _cancelFlowConfig = MutableStateFlow<CancelFlowConfig?>(null)
+    val cancelFlowConfig: StateFlow<CancelFlowConfig?> = _cancelFlowConfig.asStateFlow()
+
     // -- Async Observation (SharedFlow replaces AsyncStream) --
 
     private val _entitlementUpdates = MutableSharedFlow<List<Entitlement>>(replay = 1)
@@ -164,7 +167,15 @@ object ZeroSettle : PlayBillingUpdateDelegate {
      * Convenience that fetches products and restores entitlements.
      */
     suspend fun bootstrap(userId: String): ProductCatalog {
-        val catalog = fetchProducts(userId = userId)
+        // Fetch products + cancel flow config in parallel
+        val catalog: ProductCatalog
+        coroutineScope {
+            val catalogDeferred = async { fetchProducts(userId = userId) }
+            val cancelFlowJob = async { loadCancelFlowConfig() }
+
+            catalog = catalogDeferred.await()
+            cancelFlowJob.await()
+        }
         restoreEntitlements(userId = userId)
         return catalog
     }
@@ -536,21 +547,120 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         return result
     }
 
-    // -- Headless Subscription Management --
+    // -- Headless Cancel Flow API --
 
     /**
-     * Fetch the cancel flow configuration without presenting UI.
-     * Useful for building custom cancel flow experiences.
+     * Fetch the cancel flow configuration without presenting any UI.
+     *
+     * Use this for building custom cancel/pause UI while still using ZeroSettle's
+     * backend configuration. Returns the full config including questions, offer,
+     * and pause options.
+     *
+     * After [bootstrap], the config is also available synchronously via
+     * the [cancelFlowConfig] StateFlow.
+     *
+     * @return The cancel flow [CancelFlowConfig]
      */
     suspend fun fetchCancelFlowConfig(): CancelFlowConfig {
         val backend = this.backend ?: throw ZeroSettleError.NotConfigured
-        return try {
-            backend.fetchCancelFlow()
+
+        try {
+            val config = backend.fetchCancelFlow()
+            _cancelFlowConfig.value = config
+            ZSLogger.info(
+                "Fetched cancel flow config: enabled=${config.enabled}, questions=${config.questions.size}, pause=${config.pause?.enabled ?: false}",
+                ZSLogger.Category.IAP
+            )
+            return config
         } catch (e: Exception) {
             ZSLogger.error("Failed to fetch cancel flow config: $e", ZSLogger.Category.IAP)
             throw Backend.wrapError(e)
         }
     }
+
+    /**
+     * Accept the save offer for a subscription, applying the configured discount via Stripe.
+     *
+     * Call this when a user accepts the retention offer in your custom cancel flow UI.
+     * The backend applies the discount coupon from the dashboard config to the user's
+     * Stripe subscription.
+     *
+     * On success, refreshes entitlements automatically.
+     *
+     * @param productId The product the user was about to cancel
+     * @param userId Your app's user identifier
+     * @return A [CancelFlowSaveOfferResult] with details of the applied discount
+     */
+    suspend fun acceptSaveOffer(productId: String, userId: String): CancelFlowSaveOfferResult {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+
+        try {
+            val response = backend.acceptSaveOffer(productId = productId, userId = userId)
+            ZSLogger.info(
+                "Save offer accepted: product=$productId, message=${response.message}",
+                ZSLogger.Category.IAP
+            )
+
+            // Refresh entitlements to reflect the updated subscription
+            try {
+                restoreEntitlements(userId = userId)
+            } catch (_: Exception) {}
+
+            return CancelFlowSaveOfferResult(
+                message = response.message,
+                discountPercent = response.discountPercent,
+                durationMonths = response.durationMonths,
+            )
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to accept save offer: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
+    }
+
+    /**
+     * Submit a cancel flow response for analytics tracking.
+     *
+     * Use this when building custom cancel flow UI to report the user's answers and
+     * outcome back to ZeroSettle for funnel analytics in the dashboard.
+     *
+     * This is fire-and-forget -- errors are logged but not thrown.
+     *
+     * @param response The cancel flow response with answers and outcome
+     */
+    suspend fun submitCancelFlowResponse(response: CancelFlowResponse) {
+        val backend = this.backend ?: run {
+            ZSLogger.error("submitCancelFlowResponse called but SDK not configured", ZSLogger.Category.IAP)
+            return
+        }
+
+        val payload = CancelFlowResponsePayload(
+            userId = response.userId,
+            productId = response.productId,
+            outcome = response.outcome.name.lowercase(),
+            offerShown = response.offerShown,
+            offerAccepted = response.offerAccepted,
+            pauseShown = response.pauseShown,
+            pauseAccepted = response.pauseAccepted,
+            pauseDurationDays = response.pauseDurationDays,
+            lastStepSeen = 0,
+            answers = response.answers.map {
+                CancelFlowAnswerPayload(
+                    questionId = it.questionId,
+                    selectedOptionId = it.selectedOptionId,
+                    freeText = it.freeText,
+                )
+            },
+        )
+
+        try {
+            backend.submitCancelFlowResponse(payload)
+            ZSLogger.debug("Cancel flow response submitted", ZSLogger.Category.IAP)
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to submit cancel flow response: $e", ZSLogger.Category.IAP)
+        }
+    }
+
+    // -- Headless Subscription Management --
 
     /**
      * Pause a subscription for the given user.
@@ -590,16 +700,26 @@ object ZeroSettle : PlayBillingUpdateDelegate {
     }
 
     /**
-     * Cancel a subscription for the given user (headless, no UI).
+     * Cancel a subscription for the given product.
      *
-     * @param productId The product identifier of the subscription to cancel
+     * @param productId The product identifier to cancel
      * @param userId Your app's user identifier
+     * @param immediate If true, cancel immediately. If false, cancel at period end.
      */
-    suspend fun cancelSubscription(productId: String, userId: String) {
+    suspend fun cancelSubscription(productId: String, userId: String, immediate: Boolean = false) {
         val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+
         try {
-            backend.cancelSubscription(productId, userId)
-            ZSLogger.info("Subscription cancelled for product=$productId", ZSLogger.Category.IAP)
+            backend.cancelSubscription(productId = productId, userId = userId, immediate = immediate)
+            ZSLogger.info(
+                "Subscription cancelled: product=$productId, immediate=$immediate",
+                ZSLogger.Category.IAP
+            )
+
+            // Refresh entitlements to reflect the cancellation
+            try {
+                restoreEntitlements(userId = userId)
+            } catch (_: Exception) {}
         } catch (e: Exception) {
             ZSLogger.error("Failed to cancel subscription: $e", ZSLogger.Category.IAP)
             throw Backend.wrapError(e)
@@ -763,8 +883,8 @@ object ZeroSettle : PlayBillingUpdateDelegate {
 
     /**
      * Smart subscription management that routes to the appropriate UI.
-     * - Web checkout or both sources → Opens Stripe customer portal
-     * - Play Store only → Opens Play Store subscription management
+     * - Web checkout or both sources -> Opens Stripe customer portal
+     * - Play Store only -> Opens Play Store subscription management
      */
     suspend fun showManageSubscription(activity: Activity, userId: String) {
         val hasWebEntitlements = _entitlements.value.any { it.source == Entitlement.Source.WEB_CHECKOUT }
@@ -1025,6 +1145,23 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         val updated = _entitlements.value.toMutableList()
         updated.add(entitlement)
         updateEntitlements(updated)
+    }
+
+    /**
+     * Load and cache the cancel flow configuration. Non-throwing -- logs errors and continues.
+     */
+    private suspend fun loadCancelFlowConfig() {
+        val backend = this.backend ?: return
+        try {
+            val config = backend.fetchCancelFlow()
+            _cancelFlowConfig.value = config
+            ZSLogger.info(
+                "Cancel flow config loaded: enabled=${config.enabled}, questions=${config.questions.size}",
+                ZSLogger.Category.IAP
+            )
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to load cancel flow config during bootstrap: $e", ZSLogger.Category.IAP)
+        }
     }
 
     private fun classifyCheckoutFailure(error: Throwable): CheckoutFailure {
