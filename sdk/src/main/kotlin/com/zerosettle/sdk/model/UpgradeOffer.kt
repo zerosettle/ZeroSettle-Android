@@ -17,6 +17,8 @@ data class UpgradeOfferConfig(
     @SerialName("upgrade_type") val upgradeType: UpgradeOfferType? = null,
     val proration: UpgradeOfferProration? = null,
     val display: UpgradeOfferDisplay? = null,
+    /** A/B experiment variant identifier, if this config is part of an experiment. */
+    @SerialName("variant_id") val variantId: Int? = null,
 )
 
 /**

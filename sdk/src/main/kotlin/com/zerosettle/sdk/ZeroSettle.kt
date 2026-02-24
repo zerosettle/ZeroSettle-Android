@@ -21,6 +21,15 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
+ * Funnel analytics event types for paywall and checkout tracking.
+ */
+enum class FunnelEventType(val value: String) {
+    PAYWALL_VIEWED("paywall_viewed"),
+    CHECKOUT_STARTED("checkout_started"),
+    CHECKOUT_ABANDONED("checkout_abandoned"),
+}
+
+/**
  * Main entry point for the ZeroSettle IAP SDK.
  * Handles web checkout, entitlement management, and Play Store transaction syncing.
  * Maps to iOS `ZeroSettle` (singleton).
@@ -166,18 +175,16 @@ object ZeroSettle : PlayBillingUpdateDelegate {
     /**
      * Convenience that fetches products and restores entitlements.
      */
-    suspend fun bootstrap(userId: String): ProductCatalog {
-        // Fetch products + cancel flow config in parallel
-        val catalog: ProductCatalog
-        coroutineScope {
-            val catalogDeferred = async { fetchProducts(userId = userId) }
-            val cancelFlowJob = async { loadCancelFlowConfig() }
+    suspend fun bootstrap(userId: String): ProductCatalog = coroutineScope {
+        // Fetch products, cancel flow config, and restore entitlements in parallel.
+        val catalogDeferred = async { fetchProducts(userId = userId) }
+        val cancelFlowJob = async { loadCancelFlowConfig(userId = userId) }
+        val entitlementsDeferred = async { restoreEntitlements(userId = userId) }
 
-            catalog = catalogDeferred.await()
-            cancelFlowJob.await()
-        }
-        restoreEntitlements(userId = userId)
-        return catalog
+        val catalog = catalogDeferred.await()
+        cancelFlowJob.await()
+        entitlementsDeferred.await()
+        catalog
     }
 
     // -- Products --
@@ -458,6 +465,30 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         manager.purchase(activity, playProduct)
     }
 
+    // -- Transaction History --
+
+    /**
+     * Fetch the full transaction history for a user.
+     *
+     * Unlike [restoreEntitlements] which only returns **active** entitlements,
+     * this method returns all transactions regardless of status — including consumed
+     * consumables, expired subscriptions, refunds, and failed transactions.
+     *
+     * @param userId Your app's user identifier
+     * @return All transactions ordered by most recent first
+     */
+    suspend fun fetchTransactionHistory(userId: String): List<CheckoutTransaction> {
+        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
+        return try {
+            val transactions = backend.getTransactionHistory(userId = userId)
+            ZSLogger.info("Fetched ${transactions.size} transactions for user: $userId", ZSLogger.Category.IAP)
+            transactions
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to fetch transaction history: $e", ZSLogger.Category.IAP)
+            throw Backend.wrapError(e)
+        }
+    }
+
     // -- Cancel Flow --
 
     /**
@@ -483,7 +514,7 @@ object ZeroSettle : PlayBillingUpdateDelegate {
 
         val config: CancelFlowConfig
         try {
-            config = backend.fetchCancelFlow()
+            config = backend.fetchCancelFlow(userId = userId)
         } catch (e: Exception) {
             ZSLogger.error("Failed to fetch cancel flow config: $e", ZSLogger.Category.IAP)
             return CancelFlowResult.Cancelled
@@ -559,13 +590,14 @@ object ZeroSettle : PlayBillingUpdateDelegate {
      * After [bootstrap], the config is also available synchronously via
      * the [cancelFlowConfig] StateFlow.
      *
+     * @param userId Optional user ID for A/B experiment targeting
      * @return The cancel flow [CancelFlowConfig]
      */
-    suspend fun fetchCancelFlowConfig(): CancelFlowConfig {
+    suspend fun fetchCancelFlowConfig(userId: String? = null): CancelFlowConfig {
         val backend = this.backend ?: throw ZeroSettleError.NotConfigured
 
         try {
-            val config = backend.fetchCancelFlow()
+            val config = backend.fetchCancelFlow(userId = userId)
             _cancelFlowConfig.value = config
             ZSLogger.info(
                 "Fetched cancel flow config: enabled=${config.enabled}, questions=${config.questions.size}, pause=${config.pause?.enabled ?: false}",
@@ -862,11 +894,60 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         }
     }
 
+    // -- Funnel Analytics --
+
+    /**
+     * Fire-and-forget analytics event for paywall and checkout funnel tracking.
+     *
+     * Sends the event to the ZeroSettle backend asynchronously. Errors are
+     * silently logged at debug level and never thrown or surfaced to the caller.
+     *
+     * @param type The funnel event type
+     * @param productId The product identifier associated with this event
+     * @param screenName Optional screen name where the event occurred
+     * @param metadata Optional key-value pairs for additional context
+     */
+    fun trackEvent(
+        type: FunnelEventType,
+        productId: String,
+        screenName: String? = null,
+        metadata: Map<String, String>? = null,
+    ) {
+        val backend = this.backend ?: run {
+            ZSLogger.debug("trackEvent: SDK not configured, dropping event", ZSLogger.Category.IAP)
+            return
+        }
+
+        val userId = playBillingManager?.currentUserId ?: "anonymous"
+
+        scope.launch {
+            try {
+                backend.trackFunnelEvent(
+                    eventType = type.value,
+                    userId = userId,
+                    productId = productId,
+                    screenName = screenName,
+                    metadata = metadata,
+                )
+                ZSLogger.debug("trackEvent: ${type.value} sent for product=$productId", ZSLogger.Category.IAP)
+            } catch (e: Exception) {
+                ZSLogger.debug("trackEvent: failed to send ${type.value}: ${e.message}", ZSLogger.Category.IAP)
+            }
+        }
+    }
+
     // -- Customer Portal --
 
     /**
      * Open the Stripe customer portal for subscription management.
+     *
+     * @deprecated Use [showManageSubscription] instead — it auto-routes between
+     * Stripe and Google Play's native management UI based on entitlement sources.
      */
+    @Deprecated(
+        message = "Use showManageSubscription() instead — it auto-routes between Stripe and Play Store management based on entitlement sources.",
+        replaceWith = ReplaceWith("showManageSubscription(activity, userId)"),
+    )
     suspend fun openCustomerPortal(activity: Activity, userId: String) {
         val backend = this.backend ?: throw ZeroSettleError.NotConfigured
         val portalFlow = customerPortalFlow ?: throw ZeroSettleError.NotConfigured
@@ -1150,10 +1231,10 @@ object ZeroSettle : PlayBillingUpdateDelegate {
     /**
      * Load and cache the cancel flow configuration. Non-throwing -- logs errors and continues.
      */
-    private suspend fun loadCancelFlowConfig() {
+    private suspend fun loadCancelFlowConfig(userId: String? = null) {
         val backend = this.backend ?: return
         try {
-            val config = backend.fetchCancelFlow()
+            val config = backend.fetchCancelFlow(userId = userId)
             _cancelFlowConfig.value = config
             ZSLogger.info(
                 "Cancel flow config loaded: enabled=${config.enabled}, questions=${config.questions.size}",

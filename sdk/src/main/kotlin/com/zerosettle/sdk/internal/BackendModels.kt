@@ -83,6 +83,11 @@ internal data class EntitlementsResponse(
 )
 
 @Serializable
+internal data class TransactionHistoryResponse(
+    val transactions: List<CheckoutTransaction>,
+)
+
+@Serializable
 internal data class CheckoutSession(
     @SerialName("session_id") val sessionId: String,
     @SerialName("checkout_url") val checkoutUrl: String,
@@ -121,6 +126,8 @@ internal data class CancelFlowResponsePayload(
     @SerialName("pause_duration_days") val pauseDurationDays: Int? = null,
     @SerialName("last_step_seen") val lastStepSeen: Int,
     val answers: List<CancelFlowAnswerPayload>,
+    /** A/B experiment variant identifier echoed back from the config. */
+    @SerialName("variant_id") val variantId: Int? = null,
 )
 
 @Serializable
@@ -172,6 +179,17 @@ internal data class CancelSubscriptionRequest(
     val immediate: Boolean = false,
 )
 
+// -- Funnel Analytics --
+
+@Serializable
+internal data class TrackFunnelEventRequest(
+    @SerialName("event_type") val eventType: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("product_id") val productId: String,
+    @SerialName("screen_name") val screenName: String? = null,
+    val metadata: Map<String, String>? = null,
+)
+
 // -- Upgrade Offer --
 
 @Serializable
@@ -187,4 +205,6 @@ internal data class UpgradeOfferRespondRequest(
     @SerialName("current_product_id") val currentProductId: String,
     @SerialName("target_product_id") val targetProductId: String,
     val outcome: String,
+    /** A/B experiment variant identifier echoed back from the config. */
+    @SerialName("variant_id") val variantId: Int? = null,
 )

@@ -17,6 +17,11 @@ data class CheckoutTransaction(
     val purchasedAt: String,
     @SerialName("expires_at")
     val expiresAt: String? = null,
+    @SerialName("product_name")
+    val productName: String? = null,
+    @SerialName("amount_cents")
+    val amountCents: Int? = null,
+    val currency: String? = null,
 ) {
     /**
      * The status of a transaction.

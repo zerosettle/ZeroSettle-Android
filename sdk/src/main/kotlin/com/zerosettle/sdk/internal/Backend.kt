@@ -163,6 +163,22 @@ internal class Backend(
         return response.entitlements
     }
 
+    // -- Transaction History --
+
+    suspend fun getTransactionHistory(userId: String): List<CheckoutTransaction> {
+        val url = apiUrl("iap/transaction-history/") + "?user_id=$userId"
+        val response: TransactionHistoryResponse = try {
+            httpClient.get(
+                url = url,
+                headers = authHeaders,
+                deserializer = TransactionHistoryResponse.serializer(),
+            )
+        } catch (e: Exception) {
+            throw wrapError(e)
+        }
+        return response.transactions
+    }
+
     // -- Migration Tracking --
 
     suspend fun trackMigrationConversion(userId: String) {
@@ -220,10 +236,14 @@ internal class Backend(
 
     // -- Cancel Flow --
 
-    suspend fun fetchCancelFlow(): CancelFlowConfig {
+    suspend fun fetchCancelFlow(userId: String? = null): CancelFlowConfig {
+        val urlBuilder = StringBuilder(apiUrl("iap/cancel-flow/"))
+        if (userId != null) {
+            urlBuilder.append("?user_id=$userId")
+        }
         return try {
             httpClient.get(
-                url = apiUrl("iap/cancel-flow/"),
+                url = urlBuilder.toString(),
                 headers = authHeaders,
                 deserializer = CancelFlowConfig.serializer(),
             )
@@ -366,6 +386,26 @@ internal class Backend(
         } catch (e: Exception) {
             throw wrapError(e)
         }
+    }
+
+    // -- Funnel Analytics --
+
+    suspend fun trackFunnelEvent(
+        eventType: String,
+        userId: String,
+        productId: String,
+        screenName: String? = null,
+        metadata: Map<String, String>? = null,
+    ) {
+        val body = json.encodeToString(
+            TrackFunnelEventRequest.serializer(),
+            TrackFunnelEventRequest(eventType, userId, productId, screenName, metadata)
+        )
+        httpClient.postVoid(
+            url = apiUrl("iap/events/"),
+            body = body,
+            headers = authHeaders,
+        )
     }
 
     // -- Error Wrapping --

@@ -13,6 +13,8 @@ data class CancelFlowConfig(
     val questions: List<CancelFlowQuestion> = emptyList(),
     val offer: CancelFlowOffer? = null,
     val pause: CancelFlowPauseConfig? = null,
+    /** A/B experiment variant identifier, if this config is part of an experiment. */
+    @SerialName("variant_id") val variantId: Int? = null,
 )
 
 /**

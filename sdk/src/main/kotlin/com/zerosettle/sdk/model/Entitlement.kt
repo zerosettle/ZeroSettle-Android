@@ -23,19 +23,36 @@ data class Entitlement(
     val pausedAt: String? = null,
     @SerialName("pause_resumes_at")
     val pauseResumesAt: String? = null,
+    @SerialName("will_renew")
+    val willRenew: Boolean = true,
+    @SerialName("is_trial")
+    val isTrial: Boolean = false,
+    @SerialName("trial_ends_at")
+    val trialEndsAt: String? = null,
+    @SerialName("cancelled_at")
+    val cancelledAt: String? = null,
 ) {
     /**
      * The origin of a purchase/entitlement.
+     *
+     * A single user can hold entitlements from multiple sources simultaneously
+     * (e.g., a Play Store subscription and a web checkout consumable).
+     * [ZeroSettle.showManageSubscription] uses these values to route to the
+     * appropriate management UI.
+     *
      * String values match iOS raw values for backend compatibility.
      */
     @Serializable
     enum class Source {
+        /** Purchased through Apple StoreKit (cross-platform entitlement from an iOS purchase). */
         @SerialName("store_kit")
         STORE_KIT,
 
+        /** Purchased through Google Play Store billing. */
         @SerialName("play_store")
         PLAY_STORE,
 
+        /** Purchased through ZeroSettle's web checkout (Stripe billing). */
         @SerialName("web_checkout")
         WEB_CHECKOUT,
     }
