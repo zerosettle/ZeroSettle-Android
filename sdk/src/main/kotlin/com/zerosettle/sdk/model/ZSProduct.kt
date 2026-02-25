@@ -26,6 +26,8 @@ data class Product(
     @SerialName("synced_to_asc")
     val syncedToAppStoreConnect: Boolean = false,
     val promotion: Promotion? = null,
+    @SerialName("subscription_group_id")
+    val subscriptionGroupId: Int? = null,
 ) {
     /** The underlying Play Store product (populated after reconciliation). Not serialized. */
     @Transient
