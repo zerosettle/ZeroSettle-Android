@@ -28,6 +28,12 @@ data class Product(
     val promotion: Promotion? = null,
     @SerialName("subscription_group_id")
     val subscriptionGroupId: Int? = null,
+    @SerialName("billing_interval")
+    val billingInterval: String? = null,
+    @SerialName("free_trial_duration")
+    val freeTrialDuration: String? = null,
+    @SerialName("is_trial_eligible")
+    val isTrialEligible: Boolean? = null,
 ) {
     /** The underlying Play Store product (populated after reconciliation). Not serialized. */
     @Transient
@@ -75,6 +81,67 @@ data class Product(
             val percent = (savings * 100).toInt()
             return if (percent > 0) percent else null
         }
+
+    /** Parsed free trial duration in days. Null when no trial or user ineligible. */
+    val freeTrialDays: Int?
+        get() {
+            if (isTrialEligible != true) return null
+            val duration = freeTrialDuration ?: return null
+            return parseFreeTrialDays(duration)
+        }
+
+    /** Human-readable free trial label (e.g. "1-week free trial"). */
+    val freeTrialLabel: String?
+        get() {
+            if (isTrialEligible != true) return null
+            val duration = freeTrialDuration ?: return null
+            return formatFreeTrialLabel(duration)
+        }
+
+    companion object {
+        private fun parseFreeTrialDays(raw: String): Int? {
+            val lowered = raw.lowercase()
+            if (lowered.startsWith("p")) {
+                Regex("(\\d+)d").find(lowered)?.let { return it.groupValues[1].toIntOrNull() }
+                Regex("(\\d+)w").find(lowered)?.let { return (it.groupValues[1].toIntOrNull() ?: 0) * 7 }
+                Regex("(\\d+)m").find(lowered)?.let { return (it.groupValues[1].toIntOrNull() ?: 0) * 30 }
+            }
+            val parts = lowered.split("_")
+            if (parts.size == 2) {
+                val num = parts[0].toIntOrNull() ?: return null
+                return when (parts[1].removeSuffix("s")) {
+                    "day" -> num
+                    "week" -> num * 7
+                    "month" -> num * 30
+                    else -> num
+                }
+            }
+            return raw.toIntOrNull()
+        }
+
+        private fun formatFreeTrialLabel(raw: String): String? {
+            val lowered = raw.lowercase()
+            if (lowered.startsWith("p")) {
+                Regex("(\\d+)d").find(lowered)?.let { return "${it.groupValues[1]}-day free trial" }
+                Regex("(\\d+)w").find(lowered)?.let {
+                    val n = it.groupValues[1].toIntOrNull() ?: 0
+                    return if (n == 1) "1-week free trial" else "$n-week free trial"
+                }
+                Regex("(\\d+)m").find(lowered)?.let {
+                    val n = it.groupValues[1].toIntOrNull() ?: 0
+                    return if (n == 1) "1-month free trial" else "$n-month free trial"
+                }
+            }
+            val parts = lowered.split("_")
+            if (parts.size == 2) {
+                val num = parts[0].toIntOrNull() ?: return null
+                val unit = parts[1].removeSuffix("s")
+                return "$num-$unit free trial"
+            }
+            raw.toIntOrNull()?.let { return "$it-day free trial" }
+            return null
+        }
+    }
 
     /**
      * The type of in-app purchase product.

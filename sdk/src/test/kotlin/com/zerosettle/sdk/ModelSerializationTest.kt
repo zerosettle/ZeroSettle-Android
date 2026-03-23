@@ -331,6 +331,49 @@ class ModelSerializationTest {
         }
     }
 
+    @Test
+    fun `Product deserializes free trial fields`() {
+        val jsonStr = """
+        {
+            "id": "premium_monthly",
+            "display_name": "Premium Monthly",
+            "product_description": "Monthly premium plan",
+            "type": "auto_renewable_subscription",
+            "web_price": {"amount_micros": 69900000, "currency_code": "USD"},
+            "synced_to_asc": true,
+            "billing_interval": "month",
+            "subscription_group_id": 1,
+            "free_trial_duration": "1_week",
+            "is_trial_eligible": true
+        }
+        """.trimIndent()
+
+        val product = json.decodeFromString<Product>(jsonStr)
+        assertEquals("month", product.billingInterval)
+        assertEquals("1_week", product.freeTrialDuration)
+        assertEquals(true, product.isTrialEligible)
+        assertEquals(7, product.freeTrialDays)
+        assertEquals("1-week free trial", product.freeTrialLabel)
+    }
+
+    @Test
+    fun `Product freeTrialDays returns null when ineligible`() {
+        val jsonStr = """
+        {
+            "id": "pro",
+            "display_name": "Pro",
+            "product_description": "Pro plan",
+            "type": "auto_renewable_subscription",
+            "free_trial_duration": "1_week",
+            "is_trial_eligible": false
+        }
+        """.trimIndent()
+
+        val product = json.decodeFromString<Product>(jsonStr)
+        assertNull(product.freeTrialDays)
+        assertNull(product.freeTrialLabel)
+    }
+
     // ---------------------------------------------------------------
     // UpgradeOffer
     // ---------------------------------------------------------------
