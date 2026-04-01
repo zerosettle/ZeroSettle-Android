@@ -21,6 +21,13 @@
 3. **Build all targets** — Verify the Flutter wrapper compiles against the updated SDK
 4. **Run all tests** — `./gradlew test` for SDK, `flutter test` for Flutter wrapper
 
+## Release Propagation
+When a new tag is pushed to this repo, **you must also update and tag the Flutter wrapper**:
+1. **Flutter** (`../ZeroSettle-Flutter/`) — bump `android/build.gradle` → `implementation 'io.zerosettle:zerosettle-android:X.Y.Z'`, update bridge code if API changed, bump `pubspec.yaml` version, commit, tag, push
+2. **Docs** — update version numbers in `/Users/ryanelliott/dev/docs/iap/installation.mdx`
+
+This is not optional — stale wrappers break downstream developer builds.
+
 ## Backward Compatibility
 **Never introduce breaking changes unless explicitly approved by the user.** The SDK is consumed by third-party apps — breaking their builds or runtime behavior is unacceptable.
 
