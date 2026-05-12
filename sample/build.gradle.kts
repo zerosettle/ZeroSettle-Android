@@ -16,7 +16,11 @@ android {
     }
 
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            // Minify on, so the :core / :ui consumer ProGuard rules get exercised.
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
     }
 
     compileOptions {

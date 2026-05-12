@@ -1,20 +1,20 @@
-# Keep kotlinx.serialization metadata for @Serializable models.
--keepattributes *Annotation*, InnerClasses
--dontnote kotlinx.serialization.AnnotationsKt
+# ── ZeroSettle core consumer rules ───────────────────────────────────────────
+# Keep the public API surface.
+-keep public class com.zerosettle.sdk.** { public *; }
+-keep public enum com.zerosettle.sdk.** { *; }
 
-# Keep @Serializable models
--keep,includedescriptorclasses class com.zerosettle.sdk.**$$serializer { *; }
--keepclassmembers class com.zerosettle.sdk.** {
+# kotlinx.serialization: keep @Serializable classes + their generated serializers.
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.**
+-keepclassmembers @kotlinx.serialization.Serializable class * {
+    static <1>$Companion Companion;
+    static **$* *;
     *** Companion;
 }
--keepclasseswithmembers class com.zerosettle.sdk.** {
+-keep,includedescriptorclasses class **$$serializer { *; }
+-keepclasseswithmembers class * {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
-# Keep public SDK API surface (best-effort; consumers usually disable R8 for the SDK).
--keep public class com.zerosettle.sdk.ZeroSettle { public *; }
--keep public class com.zerosettle.sdk.ZeroSettleConfig { *; }
--keep public class com.zerosettle.sdk.Identity { *; }
--keep public class com.zerosettle.sdk.Identity$* { *; }
--keep public class com.zerosettle.sdk.models.** { public *; }
--keep public class com.zerosettle.sdk.offers.OfferManager { public *; }
+# Do NOT add -keep for com.android.billingclient.** — Play Billing ships its own consumer rules.
+# Do NOT add -keep for okhttp / okio — they ship their own.
