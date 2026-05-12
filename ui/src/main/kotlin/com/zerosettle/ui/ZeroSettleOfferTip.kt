@@ -1,0 +1,129 @@
+package com.zerosettle.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import com.zerosettle.sdk.models.Offer
+import com.zerosettle.sdk.offers.OfferManager
+import com.zerosettle.ui.theme.LocalZeroSettleStyles
+import kotlinx.coroutines.launch
+
+/**
+ * Drop-in offer banner wired to a headless [OfferManager]. Observes
+ * [OfferManager.state] / [OfferManager.offerData] / [OfferManager.checkoutError] and
+ * renders the offer card (Switch-now / Not-now), an "almost done" card while
+ * `ACCEPTED`, and a congratulations card when `COMPLETED`. Renders nothing while
+ * `LOADING` / `INELIGIBLE` / `DISMISSED`.
+ *
+ * Auto-bookkeeping: tapping the CTA calls [OfferManager.acceptOffer]; the manager
+ * drives every state transition. For migrations / store→web upgrades the manager also
+ * publishes [OfferManager.pendingCheckoutUrl] — pair this with [ZeroSettleCheckoutHost]
+ * to actually present the web checkout.
+ *
+ * Mirrors iOS's unified offer-tip view (the `ZSOfferManager`-backed tip, not the
+ * deprecated `ZSMigrateTipView` migration-only path).
+ */
+@Composable
+public fun ZeroSettleOfferTip(
+    offerManager: OfferManager,
+    modifier: Modifier = Modifier,
+    backgroundColor: Color? = null,
+    accentColor: Color? = null,
+    showCompletedCard: Boolean = true,
+    onError: (Throwable) -> Unit = {},
+) {
+    val state by offerManager.state.collectAsState()
+    val offer by offerManager.offerData.collectAsState()
+    val checkoutError by offerManager.checkoutError.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(checkoutError) { checkoutError?.let(onError) }
+
+    val data = offer ?: return
+    ZeroSettleOfferTipContent(
+        state = state,
+        offer = data,
+        onAccept = { scope.launch { offerManager.acceptOffer() } },
+        onDismiss = { scope.launch { offerManager.dismiss() } },
+        modifier = modifier,
+        backgroundColor = backgroundColor,
+        accentColor = accentColor,
+        showCompletedCard = showCompletedCard,
+    )
+}
+
+/**
+ * Stateless / hoisted offer-tip surface — the visual half of [ZeroSettleOfferTip].
+ * Useful for previews, custom presentations, and tests (no [OfferManager] needed).
+ */
+@Composable
+public fun ZeroSettleOfferTipContent(
+    state: OfferManager.OfferState,
+    offer: Offer.OfferData,
+    onAccept: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    backgroundColor: Color? = null,
+    accentColor: Color? = null,
+    showCompletedCard: Boolean = true,
+) {
+    val styles = LocalZeroSettleStyles.current
+    val accent = accentColor ?: styles.offerAccentColor
+    val surface = backgroundColor ?: styles.offerSurfaceColor
+    val titleStyle = styles.offerTitleStyle ?: MaterialTheme.typography.titleMedium
+    val bodyStyle = styles.offerBodyStyle ?: MaterialTheme.typography.bodyMedium
+    val ctaStyle = styles.offerCtaStyle ?: MaterialTheme.typography.labelLarge
+
+    @Composable
+    fun card(content: @Composable () -> Unit) = Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = surface),
+    ) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() } }
+
+    when (state) {
+        OfferManager.OfferState.LOADING,
+        OfferManager.OfferState.INELIGIBLE,
+        OfferManager.OfferState.DISMISSED -> Unit
+
+        OfferManager.OfferState.ELIGIBLE,
+        OfferManager.OfferState.PRESENTED -> card {
+            Text(offer.display.offerTitleOrDefault("Save ${offer.savingsPercent}%"), style = titleStyle)
+            Text(offer.display.offerMessageOrDefault("Switch to direct billing and save."), style = bodyStyle)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onAccept, colors = ButtonDefaults.buttonColors(containerColor = accent)) {
+                    Text(offer.display.offerCtaOrDefault("Switch now"), style = ctaStyle)
+                }
+                TextButton(onClick = onDismiss) { Text("Not now") }
+            }
+        }
+
+        OfferManager.OfferState.ACCEPTED -> card {
+            Text(offer.display.acceptedTitleOrDefault("Almost done"), style = titleStyle)
+            Text(offer.display.acceptedMessageOrDefault("Finishing up your switch…"), style = bodyStyle)
+        }
+
+        OfferManager.OfferState.COMPLETED -> if (showCompletedCard) card {
+            Text(offer.display.completedTitleOrDefault("All set!"), style = titleStyle)
+            Text(offer.display.completedMessageOrDefault("You're now billed directly."), style = bodyStyle)
+        }
+    }
+}
