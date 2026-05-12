@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.UUID
 
@@ -51,6 +52,8 @@ public object ZeroSettle {
         private set
     @Volatile internal var identityStore: IdentityStore? = null
         private set
+    @Volatile internal var playCoordinator: com.zerosettle.sdk.billing.PlayBillingCoordinator? = null
+        private set
 
     internal val scope: ZeroSettleScope = ZeroSettleScope()
     private const val SDK_VERSION = "1.0.0"
@@ -66,6 +69,24 @@ public object ZeroSettle {
             publishableKey = config.publishableKey,
             sdkVersion = SDK_VERSION,
         )
+        if (config.syncPlayPurchases) {
+            this.playCoordinator = com.zerosettle.sdk.billing.PlayBillingCoordinator(
+                context = context.applicationContext,
+                backend = this.backend!!,
+                scope = scope.scope,
+                logger = config.logger,
+                strictAck = config.strictAck,
+                userIdProvider = { activeUserId },
+                obfuscatedAccountIdProvider = {
+                    activeUserId?.let { uid -> AppAccountToken.derive(uid, context.applicationContext.packageName).toString() }
+                },
+                customerNameProvider = { customerName },
+                customerEmailProvider = { customerEmail },
+                onEntitlementsMayHaveChanged = { scope.scope.launch { restoreEntitlements() } },
+                onPendingClaim = { pc -> _pendingClaims.value = _pendingClaims.value + pc },
+                emitEvent = { e -> _events.tryEmit(e) },
+            )
+        }
         _isConfigured.value = true
     }
 
@@ -126,6 +147,7 @@ public object ZeroSettle {
         _pendingClaims.value = entResp.pendingClaims
         _isBootstrapped.value = true
         _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = entResp.entitlements.size))
+        playCoordinator?.start()
         return Result.success(products)
     }
 
@@ -149,6 +171,7 @@ public object ZeroSettle {
         _entitlements.value = emptyList()
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
+        playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         identityStore?.let { store -> runBlocking { store.clear() } }
     }
 
@@ -286,6 +309,23 @@ public object ZeroSettle {
         }
     }
 
+    // ─── Native Play Billing ───────────────────────────────────────────────
+
+    /**
+     * Native Play Billing purchase for [productId]. Originates via `BillingClient`,
+     * forwards the resulting purchase to `POST /v1/iap/play-store-transactions/`, and
+     * acknowledges only after the backend confirms (3-day-window rule — see
+     * [com.zerosettle.sdk.billing.PurchaseSyncProcessor]). Mirrors iOS `purchaseViaStoreKit()`.
+     *
+     * Requires `ZeroSettleConfig.syncPlayPurchases = true`.
+     */
+    public suspend fun purchaseViaPlayBilling(activity: android.app.Activity, productId: String): Result<Unit> {
+        if (currentUserIdOrNull() == null) return Result.failure(ZeroSettleError.UserNotIdentified)
+        val coord = playCoordinator ?: return Result.failure(ZeroSettleError.NotConfigured)
+        val product = product(productId) ?: return Result.failure(ZeroSettleError.ProductNotFound(productId))
+        return coord.purchaseViaPlayBilling(activity, product)
+    }
+
     // ─── Test surface ───────────────────────────────────────────────────────
 
     /** Test-only: reset all state. */
@@ -298,6 +338,8 @@ public object ZeroSettle {
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
         _pendingCheckout.value = false
+        playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
+        playCoordinator = null
         appContext = null
         config = null
         backend = null
@@ -309,4 +351,7 @@ public object ZeroSettle {
 
     internal fun activeUserIdForTesting(): String? = activeUserId
     internal fun customerForTesting(): Pair<String?, String?> = customerName to customerEmail
+
+    /** Test-only: the Play sync queue owned by the coordinator (requires `syncPlayPurchases = true`). */
+    internal fun playSyncQueueForTesting(): com.zerosettle.sdk.billing.PlaySyncQueue = playCoordinator!!.queue
 }
