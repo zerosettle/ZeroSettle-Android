@@ -4,20 +4,30 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.zerosettle.sample.screens.CancelFlowScreen
 import com.zerosettle.sample.screens.DebugScreen
 import com.zerosettle.sample.screens.EntitlementsScreen
+import com.zerosettle.sample.screens.HomeScreen
 import com.zerosettle.sample.screens.OffersScreen
 import com.zerosettle.sample.screens.PendingActionsScreen
-import com.zerosettle.sample.screens.ProductsScreen
-import com.zerosettle.sdk.Identity
+import com.zerosettle.sample.screens.SignInScreen
+import com.zerosettle.sample.screens.UpgradeOfferScreen
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.ui.theme.ZeroSettleTheme
 import kotlinx.coroutines.launch
@@ -26,24 +36,61 @@ class SampleActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        lifecycleScope.launch {
-            ZeroSettle.identify(
-                Identity.User(id = SampleConfig.TEST_USER_ID, name = "Sample User", email = "sample@example.com"),
-            )
-        }
         handleCheckoutCallback(intent)
 
         setContent {
             MaterialTheme {
                 ZeroSettleTheme {
                     val nav = rememberNavController()
-                    Scaffold { padding ->
-                        NavHost(nav, startDestination = "products", modifier = Modifier.padding(padding)) {
-                            composable("products") { ProductsScreen(nav) }
-                            composable("entitlements") { EntitlementsScreen(nav) }
-                            composable("offers") { OffersScreen(nav) }
-                            composable("pending") { PendingActionsScreen(nav) }
-                            composable("debug") { DebugScreen(nav) }
+                    val bootstrapped by ZeroSettle.isBootstrapped.collectAsState()
+                    val backStack by nav.currentBackStackEntryAsState()
+                    val currentRoute = backStack?.destination?.route
+                    val showBottomBar = bootstrapped && currentRoute != null && currentRoute != Routes.SIGN_IN
+
+                    Scaffold(
+                        bottomBar = {
+                            if (showBottomBar) {
+                                NavigationBar {
+                                    BOTTOM_TABS.forEach { tab ->
+                                        NavigationBarItem(
+                                            selected = currentRoute == tab.route,
+                                            onClick = {
+                                                if (currentRoute != tab.route) {
+                                                    nav.navigate(tab.route) {
+                                                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                                                        launchSingleTop = true
+                                                        restoreState = true
+                                                    }
+                                                }
+                                            },
+                                            icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                            label = { Text(tab.label) },
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                    ) { padding ->
+                        NavHost(
+                            nav,
+                            startDestination = Routes.SIGN_IN,
+                            modifier = Modifier.padding(padding),
+                        ) {
+                            composable(Routes.SIGN_IN) {
+                                SignInScreen(onIdentified = {
+                                    nav.navigate(Routes.HOME) {
+                                        popUpTo(Routes.SIGN_IN) { inclusive = true }
+                                        launchSingleTop = true
+                                    }
+                                })
+                            }
+                            composable(Routes.HOME) { HomeScreen() }
+                            composable(Routes.ENTITLEMENTS) { EntitlementsScreen() }
+                            composable(Routes.OFFERS) { OffersScreen() }
+                            composable(Routes.PENDING) { PendingActionsScreen() }
+                            composable(Routes.CANCEL) { CancelFlowScreen() }
+                            composable(Routes.UPGRADE) { UpgradeOfferScreen() }
+                            composable(Routes.DEBUG) { DebugScreen() }
                         }
                     }
                 }
@@ -57,6 +104,7 @@ class SampleActivity : ComponentActivity() {
         handleCheckoutCallback(intent)
     }
 
+    /** Receives the Stripe web-checkout return redirect (`zerosettle://checkout/return?status=...`). */
     private fun handleCheckoutCallback(intent: Intent?) {
         val data = intent?.data?.toString() ?: return
         if (data.startsWith("zerosettle://checkout")) {
