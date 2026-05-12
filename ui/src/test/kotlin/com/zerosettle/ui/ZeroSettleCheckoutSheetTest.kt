@@ -45,4 +45,22 @@ class ZeroSettleCheckoutSheetTest {
     @Test fun classifyNavigation_unrelatedUrl_isPassthrough() {
         assertTrue(ZeroSettleCheckoutSheetNav.classifyNavigation("https://js.stripe.com/v3/") is ZeroSettleCheckoutSheetNav.NavResult.Continue)
     }
+
+    @Test fun handleCheckoutResult_succeeded_callsOnSucceededOnly() {
+        var s = 0; var c = 0; var f: String? = null
+        handleCheckoutResult(ZeroSettleCheckoutResult.Succeeded("txn_1"), onSucceeded = { s++ }, onCancelled = { c++ }, onFailed = { f = it })
+        assertEquals(1, s); assertEquals(0, c); assertEquals(null, f)
+    }
+
+    @Test fun handleCheckoutResult_cancelled_callsOnCancelledOnly() {
+        var s = 0; var c = 0; var f: String? = null
+        handleCheckoutResult(ZeroSettleCheckoutResult.Cancelled, onSucceeded = { s++ }, onCancelled = { c++ }, onFailed = { f = it })
+        assertEquals(0, s); assertEquals(1, c); assertEquals(null, f)
+    }
+
+    @Test fun handleCheckoutResult_failed_callsOnFailedWithReason() {
+        var s = 0; var c = 0; var f: String? = null
+        handleCheckoutResult(ZeroSettleCheckoutResult.Failed("card_declined"), onSucceeded = { s++ }, onCancelled = { c++ }, onFailed = { f = it })
+        assertEquals(0, s); assertEquals(0, c); assertEquals("card_declined", f)
+    }
 }

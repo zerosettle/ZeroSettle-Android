@@ -77,8 +77,28 @@ public fun ZeroSettleCheckoutSheet(
                 loadUrl(checkoutUrl)
             }
         },
+        update = { webView -> if (webView.url != checkoutUrl) webView.loadUrl(checkoutUrl) },
         onRelease = { it.destroy() },
     )
+}
+
+/**
+ * Dispatch a [ZeroSettleCheckoutResult] to the right [OfferManager] continuation.
+ * Extracted so the [ZeroSettleCheckoutHost] wiring (the carried-forward "actually open
+ * the checkout" gap fix) is unit-testable without a real [OfferManager] — its
+ * constructor is `internal`.
+ */
+internal fun handleCheckoutResult(
+    result: ZeroSettleCheckoutResult,
+    onSucceeded: () -> Unit,
+    onCancelled: () -> Unit,
+    onFailed: (reason: String) -> Unit,
+) {
+    when (result) {
+        is ZeroSettleCheckoutResult.Succeeded -> onSucceeded()
+        ZeroSettleCheckoutResult.Cancelled -> onCancelled()
+        is ZeroSettleCheckoutResult.Failed -> onFailed(result.reason)
+    }
 }
 
 /**
@@ -109,11 +129,12 @@ public fun ZeroSettleCheckoutHost(
         ZeroSettleCheckoutSheet(
             checkoutUrl = current,
             onResult = { result ->
-                when (result) {
-                    is ZeroSettleCheckoutResult.Succeeded -> scope.launch { offerManager.onWebCheckoutSucceeded() }
-                    ZeroSettleCheckoutResult.Cancelled -> offerManager.cancelPendingCheckout()
-                    is ZeroSettleCheckoutResult.Failed -> { offerManager.cancelPendingCheckout(); onFailed(result.reason) }
-                }
+                handleCheckoutResult(
+                    result = result,
+                    onSucceeded = { scope.launch { offerManager.onWebCheckoutSucceeded() } },
+                    onCancelled = { offerManager.cancelPendingCheckout() },
+                    onFailed = { reason -> offerManager.cancelPendingCheckout(); onFailed(reason) },
+                )
             },
         )
     }
