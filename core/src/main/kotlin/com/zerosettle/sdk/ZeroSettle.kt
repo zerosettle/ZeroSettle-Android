@@ -54,6 +54,8 @@ public object ZeroSettle {
         private set
     @Volatile internal var playCoordinator: com.zerosettle.sdk.billing.PlayBillingCoordinator? = null
         private set
+    @Volatile internal var offerDismissalStore: com.zerosettle.sdk.offers.OfferDismissalStore? = null
+        private set
 
     internal val scope: ZeroSettleScope = ZeroSettleScope()
     private const val SDK_VERSION = "1.0.0"
@@ -61,33 +63,49 @@ public object ZeroSettle {
 
     /** Call once at `Application.onCreate()`. Safe to call again to swap config. */
     public fun configure(context: Context, config: ZeroSettleConfig) {
+        // Re-configure: tear down any prior Play coordinator so it doesn't leak.
+        playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
+        playCoordinator = null
         this.appContext = context.applicationContext
         this.config = config
         this.identityStore = IdentityStore(context.applicationContext)
+        this.offerDismissalStore = com.zerosettle.sdk.offers.OfferDismissalStore(context.applicationContext)
         this.backend = Backend(
             baseUrl = config.baseUrlOverride ?: DEFAULT_BASE_URL,
             publishableKey = config.publishableKey,
             sdkVersion = SDK_VERSION,
         )
-        if (config.syncPlayPurchases) {
-            this.playCoordinator = com.zerosettle.sdk.billing.PlayBillingCoordinator(
-                context = context.applicationContext,
-                backend = this.backend!!,
-                scope = scope.scope,
-                logger = config.logger,
-                strictAck = config.strictAck,
-                userIdProvider = { activeUserId },
-                obfuscatedAccountIdProvider = {
-                    activeUserId?.let { uid -> AppAccountToken.derive(uid, context.applicationContext.packageName).toString() }
-                },
-                customerNameProvider = { customerName },
-                customerEmailProvider = { customerEmail },
-                onEntitlementsMayHaveChanged = { scope.scope.launch { restoreEntitlements() } },
-                onPendingClaim = { pc -> _pendingClaims.value = _pendingClaims.value + pc },
-                emitEvent = { e -> _events.tryEmit(e) },
-            )
-        }
+        this.playCoordinator = buildPlayCoordinator()
         _isConfigured.value = true
+    }
+
+    /**
+     * Construct a [PlayBillingCoordinator][com.zerosettle.sdk.billing.PlayBillingCoordinator]
+     * bound to the current [scope] / [backend], or `null` when Play sync is disabled or
+     * the SDK isn't configured. Called from [configure] and re-called from [logout] so a
+     * subsequent [identify] re-enables Play sync against the fresh scope.
+     */
+    private fun buildPlayCoordinator(): com.zerosettle.sdk.billing.PlayBillingCoordinator? {
+        val cfg = config ?: return null
+        val ctx = appContext ?: return null
+        val be = backend ?: return null
+        if (!cfg.syncPlayPurchases) return null
+        return com.zerosettle.sdk.billing.PlayBillingCoordinator(
+            context = ctx,
+            backend = be,
+            scope = scope.scope,
+            logger = cfg.logger,
+            strictAck = cfg.strictAck,
+            userIdProvider = { activeUserId },
+            obfuscatedAccountIdProvider = {
+                activeUserId?.let { uid -> AppAccountToken.derive(uid, ctx.packageName).toString() }
+            },
+            customerNameProvider = { customerName },
+            customerEmailProvider = { customerEmail },
+            onEntitlementsMayHaveChanged = { scope.scope.launch { restoreEntitlements() } },
+            onPendingClaim = { pc -> _pendingClaims.value = _pendingClaims.value + pc },
+            emitEvent = { e -> _events.tryEmit(e) },
+        )
     }
 
     // ─── Identity ───────────────────────────────────────────────────────────
@@ -162,6 +180,10 @@ public object ZeroSettle {
 
     /** Clear identity, customer metadata, sync queue. Cancels in-flight background work. */
     public fun logout() {
+        // Shut the Play coordinator down BEFORE cancelling the scope so its shutdown
+        // work doesn't run against a cancelled scope; recreate it so a subsequent
+        // identify() re-enables Play sync.
+        playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         scope.reset()
         activeUserId = null
         customerName = null
@@ -171,8 +193,8 @@ public object ZeroSettle {
         _entitlements.value = emptyList()
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
-        playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         identityStore?.let { store -> runBlocking { store.clear() } }
+        playCoordinator = buildPlayCoordinator()
     }
 
     // ─── Observables ────────────────────────────────────────────────────────
@@ -326,6 +348,141 @@ public object ZeroSettle {
         return coord.purchaseViaPlayBilling(activity, product)
     }
 
+    // ─── Unified offers ────────────────────────────────────────────────────
+
+    /**
+     * Build an [OfferManager][com.zerosettle.sdk.offers.OfferManager] for the
+     * currently-identified user. Resolves eligibility from `GET /v1/iap/user-offer/`.
+     * Mirrors iOS `ZeroSettle.shared.offerManager(stripeCustomerId:)`.
+     *
+     * @throws ZeroSettleError.UserNotIdentified if [identify] hasn't run.
+     * @throws ZeroSettleError.NotConfigured if [configure] hasn't run.
+     */
+    public fun offerManager(stripeCustomerId: String? = null): com.zerosettle.sdk.offers.OfferManager {
+        val uid = currentUserIdOrNull() ?: throw ZeroSettleError.UserNotIdentified
+        val be = backend ?: throw ZeroSettleError.NotConfigured
+        val dismissals = offerDismissalStore ?: throw ZeroSettleError.NotConfigured
+        return com.zerosettle.sdk.offers.OfferManager(
+            fetchUserOffer = { be.fetchUserOffer(uid) },
+            isDismissed = { dismissals.isDismissed(uid) },
+            persistDismissal = { dismissals.dismiss(uid) },
+            createWebCheckout = { productId, playToken ->
+                be.createWebCheckout(uid, productId, playToken, customerName, customerEmail).map { it.checkoutUrl }
+            },
+            activePlayPurchaseTokenProvider = {
+                _entitlements.value.firstOrNull {
+                    it.source == com.zerosettle.sdk.models.EntitlementSource.PLAY_STORE && it.isActive
+                }?.playPurchaseToken
+            },
+            trackMigrationConversion = { source -> be.trackMigrationConversion(uid, source) },
+            playSubAutoRenewOff = {
+                val ent = _entitlements.value.firstOrNull { it.source == com.zerosettle.sdk.models.EntitlementSource.PLAY_STORE }
+                ent != null && !ent.willRenew
+            },
+            // The :ui module's offer-tip / checkout-sheet composables drive presentation
+            // (an Activity is needed for a Custom Tab); headless callers use
+            // OfferManager.checkoutUrl() and present it themselves. We just flag that a
+            // checkout is in flight so `pendingCheckout` reflects reality.
+            launchCheckout = { _ -> _pendingCheckout.value = true },
+            onEvent = { e ->
+                when (e) {
+                    is com.zerosettle.sdk.offers.OfferManager.OfferEvent.Shown -> _events.tryEmit(ZeroSettleEvent.OfferShown(e.productId))
+                    is com.zerosettle.sdk.offers.OfferManager.OfferEvent.Accepted -> _events.tryEmit(ZeroSettleEvent.OfferAccepted(e.productId))
+                    is com.zerosettle.sdk.offers.OfferManager.OfferEvent.Dismissed -> _events.tryEmit(ZeroSettleEvent.OfferDismissed(e.productId))
+                    is com.zerosettle.sdk.offers.OfferManager.OfferEvent.Completed -> _events.tryEmit(ZeroSettleEvent.MigrationCompleted(e.productId))
+                }
+            },
+            executeUpgradeOffer = { from, to -> be.executeUpgradeOffer(uid, from, to).map { } },
+        )
+    }
+
+    public suspend fun fetchUserOffer(): Result<com.zerosettle.sdk.models.UserOffer.Response> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).fetchUserOffer(uid)
+    }
+
+    public suspend fun fetchCancelFlowConfig(): Result<com.zerosettle.sdk.models.CancelFlow.Config> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).fetchCancelFlowConfig(uid)
+    }
+
+    public suspend fun fetchUpgradeOfferConfig(productId: String? = null): Result<com.zerosettle.sdk.models.UpgradeOffer.Config> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).fetchUpgradeOfferConfig(uid, productId)
+    }
+
+    public suspend fun acceptSaveOffer(productId: String): Result<com.zerosettle.sdk.models.CancelFlow.SaveOfferResult> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).acceptSaveOffer(uid, productId)
+    }
+
+    /**
+     * Execute a web→web subscription plan switch (`POST /v1/iap/upgrade-offer/execute/`).
+     * Refreshes entitlements on success. Returns the new product id.
+     */
+    public suspend fun executeUpgradeOffer(fromProductId: String, toProductId: String): Result<String> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured))
+            .executeUpgradeOffer(uid, fromProductId, toProductId)
+            .map { it.newProductId }
+            .onSuccess { scope.scope.launch { restoreEntitlements() } }
+    }
+
+    /**
+     * Record that a migration offer converted (`POST /v1/iap/migration-converted/`).
+     * [source] is `[Offer.SourceStorefront.PLAY_STORE]` for a Play→web migration,
+     * `[Offer.SourceStorefront.STORE_KIT]` for a StoreKit→web one. [OfferManager]
+     * calls this automatically; exposed here for headless / custom-WebView callers.
+     */
+    public suspend fun trackMigrationConversion(source: com.zerosettle.sdk.models.Offer.SourceStorefront): Result<Unit> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        val wire = when (source) {
+            com.zerosettle.sdk.models.Offer.SourceStorefront.PLAY_STORE -> "play_store"
+            com.zerosettle.sdk.models.Offer.SourceStorefront.STORE_KIT -> "store_kit"
+        }
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).trackMigrationConversion(uid, wire)
+    }
+
+    // ─── Subscription management ───────────────────────────────────────────
+
+    public suspend fun cancelSubscription(productId: String, immediate: Boolean = false): Result<Unit> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).cancelSubscription(uid, productId, immediate)
+            .onSuccess { scope.scope.launch { restoreEntitlements() } }
+    }
+
+    public suspend fun pauseSubscription(productId: String, pauseDurationDays: Int?): Result<String?> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).pauseSubscription(uid, productId, pauseDurationDays)
+            .map { it.resumesAt }.onSuccess { scope.scope.launch { restoreEntitlements() } }
+    }
+
+    public suspend fun resumeSubscription(productId: String): Result<Unit> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).resumeSubscription(uid, productId)
+            .onSuccess { scope.scope.launch { restoreEntitlements() } }
+    }
+
+    // ─── Cross-account claim ───────────────────────────────────────────────
+
+    /**
+     * Move a Play subscription / non-consumable from its current ZeroSettle owner to
+     * the currently-identified user. Destructive — resolves a [PendingClaim]. Posts to
+     * `POST /v1/iap/claim-entitlement/`. Never auto-invoked; the host app calls this
+     * explicitly in response to a `pendingClaims` entry.
+     */
+    public suspend fun transferPlayOwnershipToCurrentUser(productId: String, originalTransactionId: String): Result<Unit> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured))
+            .claimEntitlement(uid, productId, originalTransactionId)
+            .onSuccess {
+                _pendingClaims.value = _pendingClaims.value.filterNot {
+                    it.productId == productId && it.originalTransactionId == originalTransactionId
+                }
+                scope.scope.launch { restoreEntitlements() }
+            }
+    }
+
     // ─── Test surface ───────────────────────────────────────────────────────
 
     /** Test-only: reset all state. */
@@ -340,6 +497,7 @@ public object ZeroSettle {
         _pendingCheckout.value = false
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         playCoordinator = null
+        offerDismissalStore = null
         appContext = null
         config = null
         backend = null
