@@ -155,11 +155,17 @@ internal class Backend(
     }
 
     /**
-     * `POST /v1/iap/migration-actions/{id}/dismiss/` — dismisses a pending migration action.
-     * [actionId] is the migration transaction id (the backend's `transaction_id` path param).
+     * `POST /v1/iap/migration-actions/{transaction_id}/dismiss/` — dismisses a pending
+     * migration action (a `pending_actions[]` entry). [transactionId] is the migration
+     * transaction id (the path param). The body carries the identified [userId] (the
+     * backend 403s on a mismatch) and an [actionType] discriminator
+     * (`"info_banner_dismissed"` for a `migration_completed_info`,
+     * `"manual_play_cancel_completed"` for a `manual_play_cancel`).
      */
-    suspend fun dismissMigrationAction(actionId: String): Result<Unit> =
-        http.post("/v1/iap/migration-actions/${enc(actionId)}/dismiss/", body = "{}").map { }
+    suspend fun dismissMigrationAction(transactionId: String, userId: String, actionType: String): Result<Unit> {
+        val body = """{"user_id":"${esc(userId)}","action_type":"${esc(actionType)}"}"""
+        return http.post("/v1/iap/migration-actions/${enc(transactionId)}/dismiss/", body).map { }
+    }
 
     /**
      * `POST /v1/iap/upgrade-offer/execute/` — server-side executes an accepted

@@ -34,10 +34,15 @@ internal class EntitlementPoller(
 ) {
     @Volatile private var scope: CoroutineScope? = null
     @Volatile private var periodicJob: Job? = null
+    // The lifecycle's first ON_START after we register fires synchronously if the
+    // process is already foregrounded — which it is when [start] runs from bootstrap,
+    // and bootstrap just fetched entitlements. Skip the immediate poll on that first
+    // edge; subsequent ON_STARTs (real background→foreground returns) do poll.
+    @Volatile private var sawFirstStart = false
 
     private val lifecycleObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
-            scope?.launch { pollOnce() }
+            if (sawFirstStart) scope?.launch { pollOnce() } else sawFirstStart = true
             startPeriodic()
         }
         override fun onStop(owner: LifecycleOwner) {
@@ -55,6 +60,7 @@ internal class EntitlementPoller(
         runCatching { ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver) }
         periodicJob?.cancel(); periodicJob = null
         scope = null
+        sawFirstStart = false
     }
 
     /** Trigger an immediate poll (after a purchase / migration). No-op if [start] hasn't run. */

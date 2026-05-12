@@ -56,6 +56,8 @@ public object ZeroSettle {
         private set
     @Volatile internal var offerDismissalStore: com.zerosettle.sdk.offers.OfferDismissalStore? = null
         private set
+    @Volatile internal var entitlementPoller: com.zerosettle.sdk.entitlements.EntitlementPoller? = null
+        private set
 
     internal val scope: ZeroSettleScope = ZeroSettleScope()
     private const val SDK_VERSION = "1.0.0"
@@ -63,9 +65,11 @@ public object ZeroSettle {
 
     /** Call once at `Application.onCreate()`. Safe to call again to swap config. */
     public fun configure(context: Context, config: ZeroSettleConfig) {
-        // Re-configure: tear down any prior Play coordinator so it doesn't leak.
+        // Re-configure: tear down any prior Play coordinator / poller so they don't leak.
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         playCoordinator = null
+        entitlementPoller?.stop()
+        entitlementPoller = null
         this.appContext = context.applicationContext
         this.config = config
         this.identityStore = IdentityStore(context.applicationContext)
@@ -74,6 +78,16 @@ public object ZeroSettle {
             baseUrl = config.baseUrlOverride ?: DEFAULT_BASE_URL,
             publishableKey = config.publishableKey,
             sdkVersion = SDK_VERSION,
+        )
+        this.entitlementPoller = com.zerosettle.sdk.entitlements.EntitlementPoller(
+            backend = this.backend!!,
+            userIdProvider = { activeUserId },
+            onEntitlements = { ents ->
+                _entitlements.value = ents
+                _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = ents.size))
+            },
+            onPendingActions = { actions -> publishPendingActionsWithEvents(actions) },
+            onUnknownActionType = { config?.logger?.info("pending_actions", it) },
         )
         this.playCoordinator = buildPlayCoordinator()
         _isConfigured.value = true
@@ -102,7 +116,10 @@ public object ZeroSettle {
             },
             customerNameProvider = { customerName },
             customerEmailProvider = { customerEmail },
-            onEntitlementsMayHaveChanged = { scope.scope.launch { restoreEntitlements() } },
+            onEntitlementsMayHaveChanged = {
+                scope.scope.launch { restoreEntitlements() }
+                entitlementPoller?.pollNow()
+            },
             onPendingClaim = { pc -> _pendingClaims.value = _pendingClaims.value + pc },
             emitEvent = { e -> _events.tryEmit(e) },
         )
@@ -163,9 +180,11 @@ public object ZeroSettle {
         _products.value = products.products
         _entitlements.value = entResp.entitlements
         _pendingClaims.value = entResp.pendingClaims
+        publishPendingActionsWithEvents(parsePendingActions(entResp.pendingActions))
         _isBootstrapped.value = true
         _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = entResp.entitlements.size))
         playCoordinator?.start()
+        entitlementPoller?.start(scope.scope)
         return Result.success(products)
     }
 
@@ -183,6 +202,7 @@ public object ZeroSettle {
         // Shut the Play coordinator down BEFORE cancelling the scope so its shutdown
         // work doesn't run against a cancelled scope; recreate it so a subsequent
         // identify() re-enables Play sync.
+        entitlementPoller?.stop()
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         scope.reset()
         activeUserId = null
@@ -213,6 +233,34 @@ public object ZeroSettle {
     private val _pendingActions = MutableStateFlow<List<PendingAction>>(emptyList())
     public val pendingActions: StateFlow<List<PendingAction>> = _pendingActions.asStateFlow()
     internal fun publishPendingActions(value: List<PendingAction>) { _pendingActions.value = value }
+
+    /** Decode the raw `pending_actions[]` JSON list; unknown / malformed rows are logged and dropped. */
+    private fun parsePendingActions(raw: List<kotlinx.serialization.json.JsonObject>): List<PendingAction> =
+        com.zerosettle.sdk.entitlements.PendingActionParser.parse(raw) { config?.logger?.info("pending_actions", it) }
+
+    /**
+     * Replace [pendingActions] with [actions] and emit a [ZeroSettleEvent.PendingActionShown]
+     * for any action (keyed by `transactionId` + variant) that wasn't already showing — so a
+     * banner only "appears" once per surfacing, not on every poll.
+     */
+    private fun publishPendingActionsWithEvents(actions: List<PendingAction>) {
+        fun key(a: PendingAction): String = when (a) {
+            is PendingAction.MigrationCompletedInfo -> "migration_completed_info:${a.transactionId}"
+            is PendingAction.ManualPlayCancel -> "manual_play_cancel:${a.transactionId}"
+        }
+        val before = _pendingActions.value.map(::key).toSet()
+        _pendingActions.value = actions
+        actions.filter { key(it) !in before }.forEach { a ->
+            _events.tryEmit(
+                ZeroSettleEvent.PendingActionShown(
+                    actionType = when (a) {
+                        is PendingAction.MigrationCompletedInfo -> "migration_completed_info"
+                        is PendingAction.ManualPlayCancel -> "manual_play_cancel"
+                    },
+                ),
+            )
+        }
+    }
 
     private val _pendingCheckout = MutableStateFlow(false)
     public val pendingCheckout: StateFlow<Boolean> = _pendingCheckout.asStateFlow()
@@ -263,6 +311,7 @@ public object ZeroSettle {
         return be.fetchEntitlements(uid).map { resp ->
             _entitlements.value = resp.entitlements
             _pendingClaims.value = resp.pendingClaims
+            publishPendingActionsWithEvents(parsePendingActions(resp.pendingActions))
             _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = resp.entitlements.size))
             resp.entitlements
         }
@@ -425,7 +474,7 @@ public object ZeroSettle {
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured))
             .executeUpgradeOffer(uid, fromProductId, toProductId)
             .map { it.newProductId }
-            .onSuccess { scope.scope.launch { restoreEntitlements() } }
+            .onSuccess { scope.scope.launch { restoreEntitlements() }; entitlementPoller?.pollNow() }
     }
 
     /**
@@ -448,19 +497,19 @@ public object ZeroSettle {
     public suspend fun cancelSubscription(productId: String, immediate: Boolean = false): Result<Unit> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).cancelSubscription(uid, productId, immediate)
-            .onSuccess { scope.scope.launch { restoreEntitlements() } }
+            .onSuccess { scope.scope.launch { restoreEntitlements() }; entitlementPoller?.pollNow() }
     }
 
     public suspend fun pauseSubscription(productId: String, pauseDurationDays: Int?): Result<String?> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).pauseSubscription(uid, productId, pauseDurationDays)
-            .map { it.resumesAt }.onSuccess { scope.scope.launch { restoreEntitlements() } }
+            .map { it.resumesAt }.onSuccess { scope.scope.launch { restoreEntitlements() }; entitlementPoller?.pollNow() }
     }
 
     public suspend fun resumeSubscription(productId: String): Result<Unit> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).resumeSubscription(uid, productId)
-            .onSuccess { scope.scope.launch { restoreEntitlements() } }
+            .onSuccess { scope.scope.launch { restoreEntitlements() }; entitlementPoller?.pollNow() }
     }
 
     // ─── Cross-account claim ───────────────────────────────────────────────
@@ -480,6 +529,34 @@ public object ZeroSettle {
                     it.productId == productId && it.originalTransactionId == originalTransactionId
                 }
                 scope.scope.launch { restoreEntitlements() }
+                entitlementPoller?.pollNow()
+            }
+    }
+
+    // ─── Pending actions (chunk 3 surface) ─────────────────────────────────
+
+    /**
+     * Dismiss a [PendingAction] (typically a [PendingAction.MigrationCompletedInfo]
+     * one-time info banner). Posts to
+     * `POST /v1/iap/migration-actions/<transactionId>/dismiss/` with the identified
+     * user id and the action-type discriminator
+     * (`"info_banner_dismissed"` / `"manual_play_cancel_completed"`), then optimistically
+     * removes the action from [pendingActions] so it doesn't re-surface. For a
+     * [PendingAction.ManualPlayCancel], dismissal just hides the banner — the action
+     * also naturally disappears once Play sends the cancel RTDN and the backend reconciles.
+     */
+    public suspend fun dismissPendingAction(action: PendingAction): Result<Unit> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        val actionType = when (action) {
+            is PendingAction.MigrationCompletedInfo -> "info_banner_dismissed"
+            is PendingAction.ManualPlayCancel -> "manual_play_cancel_completed"
+        }
+        return be.dismissMigrationAction(transactionId = action.transactionId, userId = uid, actionType = actionType)
+            .onSuccess {
+                _pendingActions.value = _pendingActions.value.filterNot {
+                    it::class == action::class && it.transactionId == action.transactionId
+                }
             }
     }
 
@@ -495,6 +572,8 @@ public object ZeroSettle {
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
         _pendingCheckout.value = false
+        entitlementPoller?.stop()
+        entitlementPoller = null
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         playCoordinator = null
         offerDismissalStore = null

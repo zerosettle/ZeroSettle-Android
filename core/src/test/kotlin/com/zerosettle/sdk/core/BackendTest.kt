@@ -64,12 +64,15 @@ class BackendTest {
         assertThat(recorded.body.readUtf8()).contains("\"play_purchase_token\":\"tok\"")
     }
 
-    @Test fun dismissMigrationAction_postsToCorrectUrl() = runTest {
+    @Test fun dismissMigrationAction_postsUrlAndBody() = runTest {
         server.enqueue(MockResponse().setResponseCode(204))
-        backend.dismissMigrationAction(actionId = "act_1")
+        backend.dismissMigrationAction(transactionId = "zs_txn_1", userId = "u1", actionType = "info_banner_dismissed")
         val recorded = server.takeRequest()
         assertThat(recorded.method).isEqualTo("POST")
-        assertThat(recorded.path).isEqualTo("/v1/iap/migration-actions/act_1/dismiss/")
+        assertThat(recorded.path).isEqualTo("/v1/iap/migration-actions/zs_txn_1/dismiss/")
+        val body = recorded.body.readUtf8()
+        assertThat(body).contains("\"user_id\":\"u1\"")
+        assertThat(body).contains("\"action_type\":\"info_banner_dismissed\"")
     }
 
     @Test fun syncPlayPurchase_postsAndDecodesResponse() = runTest {
