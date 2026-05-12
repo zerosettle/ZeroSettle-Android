@@ -233,6 +233,59 @@ public object ZeroSettle {
         return be.fetchTransactionHistory(uid)
     }
 
+    // ─── Web checkout (Stripe) ─────────────────────────────────────────────
+
+    /**
+     * Open the Stripe web checkout for [productId]. Returns the `checkout_url` on
+     * success (the SDK launches it in a Custom Tab and also returns it for callers
+     * who want their own presentation). Sets [pendingCheckout] = true; cleared by
+     * [completeWebCheckout] when the checkout page redirects back.
+     *
+     * Mirrors iOS `ZeroSettle.shared.purchase(_:)` — web checkout, NOT native Play.
+     */
+    public suspend fun purchase(activity: android.app.Activity, productId: String): Result<String> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        return be.createWebCheckout(
+            userId = uid, productId = productId, playPurchaseToken = null,
+            customerName = customerName, customerEmail = customerEmail,
+        ).map { resp ->
+            _pendingCheckout.value = true
+            when (resp.checkoutPresentation) {
+                com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER ->
+                    com.zerosettle.sdk.checkout.WebCheckoutFlow.launchExternalBrowser(activity, resp.checkoutUrl)
+                else ->
+                    com.zerosettle.sdk.checkout.WebCheckoutFlow.launchCustomTab(activity, resp.checkoutUrl)
+            }
+            resp.checkoutUrl
+        }
+    }
+
+    /**
+     * Feed the `zerosettle://checkout/return…` deep link back into the SDK. The host
+     * app calls this from the Activity that received the redirect intent. Clears
+     * [pendingCheckout]; on success, refreshes entitlements and emits a
+     * [ZeroSettleEvent.PurchaseSucceeded].
+     */
+    public suspend fun completeWebCheckout(callbackUrl: String): Result<Unit> {
+        val parsed = com.zerosettle.sdk.checkout.WebCheckoutFlow.parseCallback(callbackUrl)
+            ?: return Result.failure(ZeroSettleError.CheckoutFailed("not_a_callback_url"))
+        _pendingCheckout.value = false
+        return when (parsed) {
+            is com.zerosettle.sdk.checkout.WebCheckoutFlow.CallbackResult.Succeeded -> {
+                restoreEntitlements().map {
+                    _events.tryEmit(ZeroSettleEvent.PurchaseSucceeded(productId = "", transactionId = parsed.transactionId ?: ""))
+                }
+            }
+            com.zerosettle.sdk.checkout.WebCheckoutFlow.CallbackResult.Cancelled ->
+                Result.failure(ZeroSettleError.PurchaseCancelled)
+            is com.zerosettle.sdk.checkout.WebCheckoutFlow.CallbackResult.Failed -> {
+                _events.tryEmit(ZeroSettleEvent.PurchaseFailed(productId = "", reason = parsed.reason))
+                Result.failure(ZeroSettleError.CheckoutFailed(parsed.reason))
+            }
+        }
+    }
+
     // ─── Test surface ───────────────────────────────────────────────────────
 
     /** Test-only: reset all state. */
