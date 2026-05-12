@@ -163,6 +163,21 @@ internal class Backend(
             .mapDecode(PlaySyncResponse.serializer())
     }
 
+    /**
+     * `POST /v1/iap/play-store-transactions/` with an array payload — bulk-reconciles
+     * the device's current Play purchases. The chunk-1 processor dispatches array
+     * payloads to its bulk handler. No-op (returns `processed=0`) for an empty list.
+     */
+    suspend fun bulkReconcilePlayPurchases(
+        userId: String,
+        transactions: List<BulkReconcileTransaction>,
+    ): Result<BulkReconcileResponse> {
+        if (transactions.isEmpty()) return Result.success(BulkReconcileResponse(processed = 0))
+        val req = BulkReconcileRequest(userId = userId, transactions = transactions)
+        val body = json.encodeToString(BulkReconcileRequest.serializer(), req)
+        return http.post("/v1/iap/play-store-transactions/", body).mapDecode(BulkReconcileResponse.serializer())
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private fun enc(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
@@ -227,6 +242,28 @@ internal data class PlaySyncResponse(
     val conflict: Boolean = false,
     @SerialName("claim_available") val claimAvailable: Boolean = false,
     @SerialName("existing_owner_hint") val existingOwnerHint: String? = null,
+)
+
+@Serializable
+internal data class BulkReconcileTransaction(
+    @SerialName("purchase_token") val purchaseToken: String,
+    @SerialName("product_id") val productId: String,
+    @SerialName("package_name") val packageName: String,
+    @SerialName("signed_data") val signedData: String,
+    val signature: String,
+)
+
+@Serializable
+internal data class BulkReconcileRequest(
+    @SerialName("user_id") val userId: String,
+    val transactions: List<BulkReconcileTransaction>,
+)
+
+@Serializable
+internal data class BulkReconcileResponse(
+    val processed: Int = 0,
+    @SerialName("events_emitted") val eventsEmitted: Int = 0,
+    val skipped: List<JsonObject> = emptyList(),
 )
 
 @Serializable
