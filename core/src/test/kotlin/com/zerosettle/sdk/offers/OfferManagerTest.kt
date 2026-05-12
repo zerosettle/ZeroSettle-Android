@@ -1,33 +1,71 @@
 package com.zerosettle.sdk.offers
 
 import com.google.common.truth.Truth.assertThat
-import com.zerosettle.sdk.models.Offer
 import com.zerosettle.sdk.models.UserOffer
 import com.zerosettle.sdk.models.ZeroSettleError
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import java.io.IOException
 
 class OfferManagerTest {
 
-    private fun migrationOffer(presentation: Offer.CheckoutPresentation = Offer.CheckoutPresentation.CUSTOM_TAB) =
-        Offer.OfferData(
-            flowType = Offer.FlowType.MIGRATION, upgradeType = null,
-            sourceStorefront = Offer.SourceStorefront.PLAY_STORE,
-            productId = "pro_monthly", eligibleProductIds = listOf("pro_monthly"),
+    private fun migrationDisplay() = UserOffer.OfferDisplay(
+        title = "Save 20%", body = "Switch", ctaText = "Switch now",
+        dismissText = "Not now", acceptedTitle = "All set", acceptedBody = "Done",
+        completedTitle = "Switched", completedBody = "Welcome",
+    )
+
+    private fun migrationOffer(presentation: UserOffer.CheckoutPresentation = UserOffer.CheckoutPresentation.WEBVIEW) =
+        UserOffer.OfferData(
+            actionType = UserOffer.ActionType.MIGRATE_STOREKIT_TO_WEB,
+            isEligible = true,
+            checkoutProductId = "pro_monthly",
+            fromProductId = "pro_monthly",
             savingsPercent = 20,
-            display = Offer.OfferDisplay("Save 20%", "Switch", "Switch now", "All set", "Done", "Continue", "Switched", "Welcome"),
-            freeTrialDays = 7, minSubscriptionDays = 14, maxSubscriptionDays = null,
-            rolloutPercent = 100, checkoutPresentation = presentation,
+            freeTrialDays = 7,
+            minSubscriptionDays = 14,
+            rolloutPercent = 100,
+            display = migrationDisplay(),
+            requiresAppleCancel = true,
+            checkoutPresentation = presentation,
+            source = UserOffer.SourceStorefront.PLAY_STORE,
         )
 
-    private fun webToWebUpgrade() = migrationOffer().copy(
-        flowType = Offer.FlowType.UPGRADE, upgradeType = Offer.UpgradeType.WEB_TO_WEB,
-        fromProductId = "pro_monthly", toProductId = "pro_yearly", productId = "pro_yearly",
+    private fun webToWebUpgrade() = UserOffer.OfferData(
+        actionType = UserOffer.ActionType.UPGRADE_WEB_TO_WEB,
+        isEligible = true,
+        checkoutProductId = "pro_yearly",
+        fromProductId = "pro_monthly",
+        savingsPercent = 20,
+        rolloutPercent = 100,
+        display = migrationDisplay(),
+        requiresAppleCancel = false,
+        checkoutPresentation = UserOffer.CheckoutPresentation.WEBVIEW,
+        source = null,
+    )
+
+    private fun response(offer: UserOffer.OfferData, subType: String = "active_storekit") =
+        UserOffer.Response(
+            userId = "u1", appId = 1, isSandbox = true,
+            subscription = UserOffer.Subscription(type = subType, productId = "pro_monthly"),
+            offer = offer,
+            serverTime = "2026-05-12T00:00:00Z",
+        )
+
+    private fun ineligibleResponse() = UserOffer.Response(
+        userId = "u1", appId = 1, isSandbox = true,
+        subscription = UserOffer.Subscription(type = "none"),
+        offer = UserOffer.OfferData(
+            actionType = UserOffer.ActionType.NO_ACTION,
+            isEligible = false,
+            checkoutProductId = "",
+        ),
+        serverTime = "2026-05-12T00:00:00Z",
     )
 
     private fun makeManager(
-        offerResponse: UserOffer.Response = UserOffer.Response(isEligible = true, source = Offer.SourceStorefront.PLAY_STORE, offer = migrationOffer()),
+        offerResult: Result<UserOffer.Response> = Result.success(response(migrationOffer())),
         dismissed: Boolean = false,
         createCheckout: suspend (productId: String, playToken: String?) -> Result<String> = { _, _ -> Result.success("https://c/x") },
         playTokenProvider: () -> String? = { "ptok_active" },
@@ -36,7 +74,7 @@ class OfferManagerTest {
         executeUpgrade: suspend (from: String, to: String) -> Result<Unit> = { _, _ -> Result.success(Unit) },
         onEvent: (OfferManager.OfferEvent) -> Unit = {},
     ) = OfferManager(
-        fetchUserOffer = { Result.success(offerResponse) },
+        fetchUserOffer = { offerResult },
         isDismissed = { dismissed },
         persistDismissal = { },
         createWebCheckout = createCheckout,
@@ -52,7 +90,7 @@ class OfferManagerTest {
         val m = makeManager()
         m.evaluate()
         assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.PRESENTED)
-        assertThat(m.offerData.first()?.flowType).isEqualTo(Offer.FlowType.MIGRATION)
+        assertThat(m.offerData.first()?.actionType).isEqualTo(UserOffer.ActionType.MIGRATE_STOREKIT_TO_WEB)
     }
 
     @Test fun evaluate_dismissed_movesToIneligible() = runTest {
@@ -62,9 +100,21 @@ class OfferManagerTest {
     }
 
     @Test fun evaluate_notEligible_movesToIneligible() = runTest {
-        val m = makeManager(offerResponse = UserOffer.Response(isEligible = false))
+        val m = makeManager(offerResult = Result.success(ineligibleResponse()))
         m.evaluate()
         assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.INELIGIBLE)
+    }
+
+    @Test fun evaluate_fetchFails_movesToErrorAndEmitsEvaluationFailed() = runTest {
+        val events = mutableListOf<OfferManager.OfferEvent>()
+        val m = makeManager(
+            offerResult = Result.failure(ZeroSettleError.NetworkError(IOException("boom"))),
+            onEvent = { events += it },
+        )
+        m.evaluate()
+        assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.ERROR)
+        assertThat(m.checkoutError.first()).isNotNull()
+        assertThat(events.filterIsInstance<OfferManager.OfferEvent.EvaluationFailed>()).isNotEmpty()
     }
 
     @Test fun acceptOffer_migration_createsCheckoutWithPlayToken_thenAccepted() = runTest {
@@ -89,7 +139,7 @@ class OfferManagerTest {
     @Test fun webToWebUpgrade_acceptOffer_jumpsStraightToCompleted() = runTest {
         var executed: Pair<String, String>? = null
         val m = makeManager(
-            offerResponse = UserOffer.Response(isEligible = true, offer = webToWebUpgrade()),
+            offerResult = Result.success(response(webToWebUpgrade(), subType = "active_web")),
             executeUpgrade = { from, to -> executed = from to to; Result.success(Unit) },
         )
         m.evaluate()
@@ -122,7 +172,7 @@ class OfferManagerTest {
     }
 
     @Test fun webToWebUpgrade_acceptOffer_doesNotPublishPendingCheckoutUrl() = runTest {
-        val m = makeManager(offerResponse = UserOffer.Response(isEligible = true, offer = webToWebUpgrade()))
+        val m = makeManager(offerResult = Result.success(response(webToWebUpgrade(), subType = "active_web")))
         m.evaluate(); m.acceptOffer()
         assertThat(m.pendingCheckoutUrl.first()).isNull()
     }
@@ -139,7 +189,7 @@ class OfferManagerTest {
     @Test fun dismiss_movesToDismissedAndPersists() = runTest {
         var persisted = false
         val m = OfferManager(
-            fetchUserOffer = { Result.success(UserOffer.Response(isEligible = true, offer = migrationOffer())) },
+            fetchUserOffer = { Result.success(response(migrationOffer())) },
             isDismissed = { false }, persistDismissal = { persisted = true },
             createWebCheckout = { _, _ -> Result.success("x") }, activePlayPurchaseTokenProvider = { "ptok" },
             trackMigrationConversion = { Result.success(Unit) }, playSubAutoRenewOff = { false },

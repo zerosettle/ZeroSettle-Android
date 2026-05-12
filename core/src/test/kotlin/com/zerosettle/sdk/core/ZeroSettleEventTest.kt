@@ -15,6 +15,7 @@ class ZeroSettleEventTest {
             ZeroSettleEvent.SyncFailed(purchaseToken = "t", attempts = 5, terminal = true),
             ZeroSettleEvent.EntitlementsRefreshed(count = 2),
             ZeroSettleEvent.PendingActionShown(actionType = "manual_play_cancel"),
+            ZeroSettleEvent.OfferEvaluationFailed(reason = "boom"),
         )
         events.forEach { e ->
             val tag: String = when (e) {
@@ -27,6 +28,7 @@ class ZeroSettleEventTest {
                 is ZeroSettleEvent.SyncFailed -> "sf"
                 is ZeroSettleEvent.EntitlementsRefreshed -> "er"
                 is ZeroSettleEvent.PendingActionShown -> "pa"
+                is ZeroSettleEvent.OfferEvaluationFailed -> "ef"
             }
             assertThat(tag).isNotEmpty()
         }

@@ -54,11 +54,15 @@ class MigrationFlowTest {
     }
 
     private fun eligibleOfferBody() =
-        """{"is_eligible":true,"source":"play_store","offer":{
-          "flow_type":"migration","upgrade_type":null,"source_storefront":"play_store",
-          "product_id":"pro_monthly_web","eligible_product_ids":["pro_monthly"],"savings_percent":20,
-          "display":{"offer_title":"Save 20%","offer_message":"","offer_cta":"Switch","accepted_title":"","accepted_message":"","accepted_cta":"","completed_title":"","completed_message":""},
-          "free_trial_days":7,"min_subscription_days":14,"max_subscription_days":null,"rollout_percent":100,"checkout_presentation":"custom_tab","disclosure_text":"You'll be billed via Google Pay."}}"""
+        """{"user_id":"u1","app_id":1,"is_sandbox":true,
+          "subscription":{"type":"active_storekit","product_id":"pro_monthly"},
+          "offer":{
+            "action_type":"migrate_storekit_to_web","is_eligible":true,
+            "checkout_product_id":"pro_monthly_web","from_product_id":"pro_monthly","savings_percent":20,
+            "display":{"title":"Save 20%","body":"Switch and save via Google Pay.","cta_text":"Switch","dismiss_text":"Not now","accepted_title":"All set","accepted_body":"You're switching.","completed_title":"Switched","completed_body":"Welcome."},
+            "free_trial_days":7,"min_subscription_days":14,"max_subscription_days":null,"rollout_percent":100,
+            "requires_apple_cancel":true,"checkout_presentation":"webview","source":"play_store"},
+          "server_time":"2026-05-12T00:00:00Z"}"""
 
     @Test fun playToWebMigration_evaluate_accept_complete() = runTest {
         identifyWithPlaySub()
@@ -67,7 +71,7 @@ class MigrationFlowTest {
         val mgr = ZeroSettle.offerManager()
         mgr.evaluate()
         assertThat(mgr.state.first()).isEqualTo(OfferManager.OfferState.PRESENTED)
-        assertThat(mgr.offerData.first()?.disclosureText).contains("Google Pay")
+        assertThat(mgr.offerData.first()?.display?.body).contains("Google Pay")
         server.takeRequest() // drain the user-offer request
 
         // acceptOffer() → POST /v1/iap/checkout-configs/ with play_purchase_token → checkout URL.
