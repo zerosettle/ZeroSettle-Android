@@ -21,12 +21,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -62,7 +60,6 @@ import com.zerosettle.sample.IAPEnvironment
 import com.zerosettle.sample.SampleAppState
 import com.zerosettle.sample.ui.theme.Green
 import com.zerosettle.sample.ui.theme.Indigo
-import com.zerosettle.sample.ui.theme.Orange
 import com.zerosettle.sample.ui.theme.Purple
 import kotlinx.coroutines.launch
 
@@ -327,36 +324,6 @@ fun SettingsScreen(
                                 snackbarHostState.showSnackbar("Error: ${e.message}")
                             } finally {
                                 isRestoring = false
-                            }
-                        }
-                    },
-                )
-
-                ActionButton(
-                    text = "Open Customer Portal",
-                    icon = Icons.Filled.CreditCard,
-                    color = Orange,
-                    onClick = {
-                        scope.launch {
-                            try {
-                                appState.openCustomerPortal()
-                            } catch (e: Exception) {
-                                snackbarHostState.showSnackbar("Error: ${e.message}")
-                            }
-                        }
-                    },
-                )
-
-                ActionButton(
-                    text = "Manage Subscription",
-                    icon = Icons.Filled.Settings,
-                    color = Orange,
-                    onClick = {
-                        scope.launch {
-                            try {
-                                appState.manageSubscription()
-                            } catch (e: Exception) {
-                                snackbarHostState.showSnackbar("Error: ${e.message}")
                             }
                         }
                     },

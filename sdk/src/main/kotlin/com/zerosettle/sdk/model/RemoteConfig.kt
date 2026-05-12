@@ -94,6 +94,8 @@ data class MigrationPrompt(
     val productId: String,
     @SerialName("discount_percent")
     val discountPercent: Int,
+    @SerialName("free_trial_days")
+    val freeTrialDays: Int = 0,
     val title: String,
     val message: String,
     @SerialName("cta_text")

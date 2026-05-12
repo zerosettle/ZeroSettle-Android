@@ -122,16 +122,6 @@ class SampleAppState : ZeroSettleDelegate {
         statusMessage = "Play Store purchase complete!"
     }
 
-    suspend fun openCustomerPortal() {
-        val act = activity ?: throw IllegalStateException("No activity")
-        ZeroSettle.openCustomerPortal(activity = act, userId = userId)
-    }
-
-    suspend fun manageSubscription() {
-        val act = activity ?: throw IllegalStateException("No activity")
-        ZeroSettle.showManageSubscription(activity = act, userId = userId)
-    }
-
     suspend fun cancelSubscription(productId: String): CancelFlowResult {
         val act = activity ?: throw IllegalStateException("No activity")
         return ZeroSettle.presentCancelFlow(

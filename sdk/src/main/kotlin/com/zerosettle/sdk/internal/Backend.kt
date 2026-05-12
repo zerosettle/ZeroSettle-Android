@@ -197,25 +197,6 @@ internal class Backend(
         }
     }
 
-    // -- Customer Portal --
-
-    suspend fun createCustomerPortalSession(userId: String): CustomerPortalSession {
-        val body = json.encodeToString(
-            CreateCustomerPortalSessionRequest.serializer(),
-            CreateCustomerPortalSessionRequest(userId)
-        )
-        return try {
-            httpClient.post(
-                url = apiUrl("iap/customer-portal-sessions/"),
-                body = body,
-                headers = authHeaders,
-                deserializer = CustomerPortalSession.serializer(),
-            )
-        } catch (e: Exception) {
-            throw wrapError(e)
-        }
-    }
-
     // -- Play Store Transaction Sync --
 
     suspend fun syncPlayStoreTransaction(purchaseToken: String, userId: String) {
@@ -517,6 +498,7 @@ internal class Backend(
                 MigrationPrompt(
                     productId = migrationResponse.productId,
                     discountPercent = migrationResponse.discountPercent,
+                    freeTrialDays = migrationResponse.freeTrialDays ?: 0,
                     title = migrationResponse.title,
                     message = migrationResponse.message,
                     ctaText = migrationResponse.ctaText ?: "Save ${migrationResponse.discountPercent}% Forever",

@@ -37,8 +37,6 @@ data class Entitlement(
      *
      * A single user can hold entitlements from multiple sources simultaneously
      * (e.g., a Play Store subscription and a web checkout consumable).
-     * [ZeroSettle.showManageSubscription] uses these values to route to the
-     * appropriate management UI.
      *
      * String values match iOS raw values for backend compatibility.
      */

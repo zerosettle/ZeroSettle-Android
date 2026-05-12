@@ -30,11 +30,6 @@ internal data class MigrationConversionRequest(
 )
 
 @Serializable
-internal data class CreateCustomerPortalSessionRequest(
-    @SerialName("user_id") val userId: String,
-)
-
-@Serializable
 internal data class SyncPlayStoreTransactionRequest(
     @SerialName("purchase_token") val purchaseToken: String,
     @SerialName("user_id") val userId: String,
@@ -72,6 +67,7 @@ internal data class MigrationPromptResponse(
     @SerialName("should_show") val shouldShow: Boolean,
     @SerialName("product_id") val productId: String? = null,
     @SerialName("discount_percent") val discountPercent: Int? = null,
+    @SerialName("free_trial_days") val freeTrialDays: Int? = null,
     val title: String? = null,
     val message: String? = null,
     @SerialName("cta_text") val ctaText: String? = null,
@@ -105,11 +101,6 @@ internal data class PaymentIntentResponse(
     @SerialName("callback_url") val callbackUrl: String,
     @SerialName("publishable_key") val publishableKey: String,
     @SerialName("checkout_url") val checkoutUrl: String,
-)
-
-@Serializable
-internal data class CustomerPortalSession(
-    @SerialName("portal_url") val portalUrl: String,
 )
 
 // -- Cancel Flow --

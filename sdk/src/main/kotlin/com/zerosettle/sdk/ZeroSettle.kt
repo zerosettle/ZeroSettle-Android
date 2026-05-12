@@ -121,7 +121,6 @@ object ZeroSettle : PlayBillingUpdateDelegate {
 
     private var backend: Backend? = null
     private var checkoutFlow: WebCheckoutFlow? = null
-    private var customerPortalFlow: CustomerPortalFlow? = null
     private var playBillingManager: PlayBillingManager? = null
     private var appContext: Context? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -150,8 +149,6 @@ object ZeroSettle : PlayBillingUpdateDelegate {
         this.backend = backend
 
         this.checkoutFlow = WebCheckoutFlow(backend)
-        this.customerPortalFlow = CustomerPortalFlow()
-
         if (config.syncPlayStoreTransactions) {
             val manager = PlayBillingManager(context.applicationContext, backend)
             manager.delegate = this
@@ -574,8 +571,52 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             }
         }
 
+        // Actually cancel the subscription when user confirms cancellation.
+        // Cancel at period end (immediate = false) so the user keeps access until
+        // their current billing cycle ends — standard cancellation UX.
+        if (result is CancelFlowResult.Cancelled) {
+            // Prefer web checkout entitlement when both exist (e.g. after Switch & Save,
+            // the Play Store entitlement is still active but the user is now on web billing).
+            val matching = _entitlements.value.filter { it.productId == productId }
+            val entSource = (matching.firstOrNull { it.source == Entitlement.Source.WEB_CHECKOUT }
+                ?: matching.firstOrNull())?.source
+
+            if (entSource == Entitlement.Source.PLAY_STORE) {
+                // Play Store subscriptions can't be cancelled via ZeroSettle — open
+                // Google Play's subscription management so the user can cancel there.
+                ZSLogger.info("Cancel flow: Play Store subscription — opening Google Play subscription management", ZSLogger.Category.IAP)
+                openPlayStoreSubscriptions(activity, productId)
+            } else if (entSource == Entitlement.Source.STORE_KIT) {
+                // StoreKit subscriptions can only be managed on the iOS device.
+                ZSLogger.info("Cancel flow: StoreKit subscription — must be cancelled on the iOS device", ZSLogger.Category.IAP)
+            } else {
+                try {
+                    cancelSubscription(productId = productId, userId = userId, immediate = false)
+                } catch (e: Exception) {
+                    ZSLogger.error("Cancel flow: subscription cancel API failed — user intent recorded but subscription may still be active: $e", ZSLogger.Category.IAP)
+                }
+            }
+        }
+
         ZSLogger.info("Cancel flow completed with result: ${result.outcomeName}", ZSLogger.Category.IAP)
         return result
+    }
+
+    // -- Manage Subscriptions --
+
+    /**
+     * Open Google Play's subscription management for a specific subscription.
+     * Falls back to the general subscriptions page if the deep link fails.
+     */
+    private fun openPlayStoreSubscriptions(activity: Activity, productId: String) {
+        try {
+            val uri = Uri.parse(
+                "https://play.google.com/store/account/subscriptions?sku=$productId&package=${activity.packageName}"
+            )
+            activity.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+        } catch (e: Exception) {
+            ZSLogger.error("Failed to open Play Store subscription management: $e", ZSLogger.Category.IAP)
+        }
     }
 
     // -- Headless Cancel Flow API --
@@ -933,63 +974,6 @@ object ZeroSettle : PlayBillingUpdateDelegate {
             } catch (e: Exception) {
                 ZSLogger.debug("trackEvent: failed to send ${type.value}: ${e.message}", ZSLogger.Category.IAP)
             }
-        }
-    }
-
-    // -- Customer Portal --
-
-    /**
-     * Open the Stripe customer portal for subscription management.
-     *
-     * @deprecated Use [showManageSubscription] instead — it auto-routes between
-     * Stripe and Google Play's native management UI based on entitlement sources.
-     */
-    @Deprecated(
-        message = "Use showManageSubscription() instead — it auto-routes between Stripe and Play Store management based on entitlement sources.",
-        replaceWith = ReplaceWith("showManageSubscription(activity, userId)"),
-    )
-    suspend fun openCustomerPortal(activity: Activity, userId: String) {
-        val backend = this.backend ?: throw ZeroSettleError.NotConfigured
-        val portalFlow = customerPortalFlow ?: throw ZeroSettleError.NotConfigured
-
-        try {
-            val session = backend.createCustomerPortalSession(userId = userId)
-            ZSLogger.info("Customer portal session created", ZSLogger.Category.IAP)
-            portalFlow.presentPortal(activity, session.portalUrl)
-        } catch (e: Exception) {
-            ZSLogger.error("Customer portal failed: $e", ZSLogger.Category.IAP)
-            throw Backend.wrapError(e)
-        }
-    }
-
-    /**
-     * Smart subscription management that routes to the appropriate UI.
-     * - Web checkout or both sources -> Opens Stripe customer portal
-     * - Play Store only -> Opens Play Store subscription management
-     */
-    suspend fun showManageSubscription(activity: Activity, userId: String) {
-        val hasWebEntitlements = _entitlements.value.any { it.source == Entitlement.Source.WEB_CHECKOUT }
-        val hasPlayStoreEntitlements = _entitlements.value.any { it.source == Entitlement.Source.PLAY_STORE }
-
-        if (hasPlayStoreEntitlements && !hasWebEntitlements) {
-            ZSLogger.info(
-                "Opening Play Store subscription management (Play Store-only entitlements)",
-                ZSLogger.Category.IAP
-            )
-            val intent = android.content.Intent(
-                android.content.Intent.ACTION_VIEW,
-                Uri.parse("https://play.google.com/store/account/subscriptions")
-            )
-            activity.startActivity(intent)
-            try {
-                restoreEntitlements(userId = userId)
-            } catch (_: Exception) {}
-        } else {
-            ZSLogger.info(
-                "Opening Stripe customer portal (web/mixed/no entitlements)",
-                ZSLogger.Category.IAP
-            )
-            openCustomerPortal(activity, userId)
         }
     }
 
