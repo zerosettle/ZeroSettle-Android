@@ -64,6 +64,19 @@ public class OfferManager internal constructor(
     private val _checkoutError = MutableStateFlow<ZeroSettleError?>(null)
     public val checkoutError: StateFlow<ZeroSettleError?> = _checkoutError.asStateFlow()
 
+    /**
+     * Non-null while a web checkout for an accepted offer is awaiting presentation /
+     * completion. Set by [acceptOffer] (for migrations / store→web upgrades — there is
+     * no checkout for web→web), cleared by [onWebCheckoutSucceeded] and
+     * [cancelPendingCheckout]. The `:ui` `ZeroSettleCheckoutHost` composable observes
+     * this and presents the checkout (WebView / Custom Tab); headless callers can use
+     * [checkoutUrl] instead. This is the wiring for the carried-forward "actually open
+     * the checkout" gap — the facade's `launchCheckout` callback still fires (it flags
+     * `ZeroSettle.pendingCheckout`), this flow is the presentation handle.
+     */
+    private val _pendingCheckoutUrl = MutableStateFlow<String?>(null)
+    public val pendingCheckoutUrl: StateFlow<String?> = _pendingCheckoutUrl.asStateFlow()
+
     /** Resolve eligibility from the server. Sets `LOADING → INELIGIBLE | PRESENTED`. */
     public suspend fun evaluate() {
         _isLoading.value = true
@@ -111,6 +124,7 @@ public class OfferManager internal constructor(
             _checkoutError.value = err as? ZeroSettleError ?: ZeroSettleError.CheckoutFailed(err.message ?: "unknown")
             return Result.failure(err)
         }
+        _pendingCheckoutUrl.value = url
         launchCheckout(url)
         _state.value = OfferState.ACCEPTED
         return Result.success(Unit)
@@ -124,6 +138,7 @@ public class OfferManager internal constructor(
      * upgrades are already `COMPLETED` by then.
      */
     public suspend fun onWebCheckoutSucceeded() {
+        _pendingCheckoutUrl.value = null
         val offer = _offerData.value ?: return
         val source = when (offer.sourceStorefront) {
             Offer.SourceStorefront.PLAY_STORE -> "play_store"
@@ -154,9 +169,20 @@ public class OfferManager internal constructor(
 
     public suspend fun dismiss() {
         val offer = _offerData.value
+        _pendingCheckoutUrl.value = null
         persistDismissal()
         _state.value = OfferState.DISMISSED
         offer?.let { onEvent(OfferEvent.Dismissed(it.productId)) }
+    }
+
+    /**
+     * The user backed out of the checkout (closed the WebView / Custom Tab) without
+     * completing it. Clears [pendingCheckoutUrl]; the manager stays `ACCEPTED` so the
+     * host can re-present (call [acceptOffer] again to create a fresh checkout, or
+     * surface a "resume" affordance off [pendingCheckoutUrl] before it's cleared).
+     */
+    public fun cancelPendingCheckout() {
+        _pendingCheckoutUrl.value = null
     }
 
     /**

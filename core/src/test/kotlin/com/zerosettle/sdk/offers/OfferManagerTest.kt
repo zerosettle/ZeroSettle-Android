@@ -111,6 +111,31 @@ class OfferManagerTest {
         assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.COMPLETED)
     }
 
+    @Test fun acceptOffer_migration_publishesPendingCheckoutUrl_clearedOnSuccess() = runTest {
+        val m = makeManager(createCheckout = { _, _ -> Result.success("https://checkout/x") })
+        m.evaluate()
+        assertThat(m.pendingCheckoutUrl.first()).isNull()
+        m.acceptOffer()
+        assertThat(m.pendingCheckoutUrl.first()).isEqualTo("https://checkout/x")
+        m.onWebCheckoutSucceeded()
+        assertThat(m.pendingCheckoutUrl.first()).isNull()
+    }
+
+    @Test fun webToWebUpgrade_acceptOffer_doesNotPublishPendingCheckoutUrl() = runTest {
+        val m = makeManager(offerResponse = UserOffer.Response(isEligible = true, offer = webToWebUpgrade()))
+        m.evaluate(); m.acceptOffer()
+        assertThat(m.pendingCheckoutUrl.first()).isNull()
+    }
+
+    @Test fun cancelPendingCheckout_clearsUrl_keepsAcceptedState() = runTest {
+        val m = makeManager()
+        m.evaluate(); m.acceptOffer()
+        assertThat(m.pendingCheckoutUrl.first()).isNotNull()
+        m.cancelPendingCheckout()
+        assertThat(m.pendingCheckoutUrl.first()).isNull()
+        assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.ACCEPTED)
+    }
+
     @Test fun dismiss_movesToDismissedAndPersists() = runTest {
         var persisted = false
         val m = OfferManager(
