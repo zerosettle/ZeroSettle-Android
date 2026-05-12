@@ -11,6 +11,8 @@ public sealed class ZeroSettleEvent {
     public data class OfferShown(val productId: String) : ZeroSettleEvent()
     public data class OfferAccepted(val productId: String) : ZeroSettleEvent()
     public data class OfferDismissed(val productId: String) : ZeroSettleEvent()
+    /** The `GET /v1/iap/user-offer/` call failed (transport / decode error) — distinct from a quiet "no offer". */
+    public data class OfferEvaluationFailed(val reason: String) : ZeroSettleEvent()
     public data class PurchaseSucceeded(val productId: String, val transactionId: String) : ZeroSettleEvent()
     public data class PurchaseFailed(val productId: String, val reason: String) : ZeroSettleEvent()
     public data class MigrationCompleted(val productId: String) : ZeroSettleEvent()

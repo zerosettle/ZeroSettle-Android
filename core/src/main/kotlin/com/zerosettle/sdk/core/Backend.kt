@@ -110,48 +110,85 @@ internal class Backend(
 
     // ─── Subscription management ───────────────────────────────────────────
 
-    /** `POST /v1/iap/cancel-subscription/` — cancels a web-checkout subscription. */
+    /** `POST /v1/iap/subscriptions/cancel/` — cancels a web-checkout subscription. */
     suspend fun cancelSubscription(userId: String, productId: String, immediate: Boolean): Result<Unit> {
         val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}","immediate":$immediate}"""
-        return http.post("/v1/iap/cancel-subscription/", body).map { }
+        return http.post("/v1/iap/subscriptions/cancel/", body).map { }
     }
 
-    /** `POST /v1/iap/pause-subscription/` — pauses a web-checkout subscription; returns the resume date. */
+    /** `POST /v1/iap/subscriptions/pause/` — pauses a web-checkout subscription; returns the resume date. */
     suspend fun pauseSubscription(userId: String, productId: String, pauseDurationDays: Int?): Result<PauseResponse> {
         val days = pauseDurationDays?.toString() ?: "null"
         val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}","pause_duration_days":$days}"""
-        return http.post("/v1/iap/pause-subscription/", body).mapDecode(PauseResponse.serializer())
+        return http.post("/v1/iap/subscriptions/pause/", body).mapDecode(PauseResponse.serializer())
     }
 
-    /** `POST /v1/iap/resume-subscription/` — resumes a paused web-checkout subscription. */
+    /** `POST /v1/iap/subscriptions/resume/` — resumes a paused web-checkout subscription. */
     suspend fun resumeSubscription(userId: String, productId: String): Result<Unit> {
         val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}"}"""
-        return http.post("/v1/iap/resume-subscription/", body).map { }
+        return http.post("/v1/iap/subscriptions/resume/", body).map { }
     }
 
     // ─── Cancel flow ───────────────────────────────────────────────────────
 
-    /** `GET /v1/iap/cancel-flow-config/?user_id=…` — server-driven retention survey + save offer. */
+    /** `GET /v1/iap/cancel-flow/?user_id=…` — server-driven retention survey + save offer. */
     suspend fun fetchCancelFlowConfig(userId: String): Result<com.zerosettle.sdk.models.CancelFlow.Config> =
-        http.get("/v1/iap/cancel-flow-config/?user_id=${enc(userId)}")
+        http.get("/v1/iap/cancel-flow/?user_id=${enc(userId)}")
             .mapDecode(com.zerosettle.sdk.models.CancelFlow.Config.serializer())
 
-    /** `POST /v1/iap/cancel-flow-save-offer/` — accepts the in-cancel-flow save offer. */
+    /** `POST /v1/iap/cancel-flow/accept-offer/` — accepts the in-cancel-flow save offer. */
     suspend fun acceptSaveOffer(userId: String, productId: String): Result<com.zerosettle.sdk.models.CancelFlow.SaveOfferResult> {
         val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}"}"""
-        return http.post("/v1/iap/cancel-flow-save-offer/", body)
+        return http.post("/v1/iap/cancel-flow/accept-offer/", body)
             .mapDecode(com.zerosettle.sdk.models.CancelFlow.SaveOfferResult.serializer())
+    }
+
+    /**
+     * `POST /v1/iap/cancel-flow/respond/` — records the user's cancel-flow outcome
+     * for retention analytics. [outcome] is one of `cancelled` / `retained` /
+     * `dismissed` / `paused`. Optional [variantId] is the experiment variant id the
+     * SDK received from the GET (echoed back so impressions/conversions line up).
+     */
+    suspend fun submitCancelFlowResponse(
+        userId: String,
+        outcome: String,
+        productId: String? = null,
+        variantId: Int? = null,
+    ): Result<Unit> {
+        val req = CancelFlowResponseRequest(
+            userId = userId, outcome = outcome, productId = productId, variantId = variantId,
+        )
+        val body = json.encodeToString(CancelFlowResponseRequest.serializer(), req)
+        return http.post("/v1/iap/cancel-flow/respond/", body).map { }
     }
 
     // ─── Upgrade offer ─────────────────────────────────────────────────────
 
-    /** `GET /v1/iap/upgrade-offer-config/?user_id=…[&product_id=…]` — in-app plan-switch offer config. */
+    /** `GET /v1/iap/upgrade-offer/?user_id=…[&product_id=…]` — in-app plan-switch offer config. */
     suspend fun fetchUpgradeOfferConfig(userId: String, productId: String?): Result<com.zerosettle.sdk.models.UpgradeOffer.Config> {
         val path = buildString {
-            append("/v1/iap/upgrade-offer-config/?user_id=").append(enc(userId))
+            append("/v1/iap/upgrade-offer/?user_id=").append(enc(userId))
             productId?.let { append("&product_id=").append(enc(it)) }
         }
         return http.get(path).mapDecode(com.zerosettle.sdk.models.UpgradeOffer.Config.serializer())
+    }
+
+    /**
+     * `POST /v1/iap/upgrade-offer/respond/` — records a declined/dismissed upgrade
+     * offer. [outcome] is `declined` or `dismissed`.
+     */
+    suspend fun respondUpgradeOffer(
+        userId: String,
+        currentProductId: String,
+        targetProductId: String,
+        outcome: String,
+    ): Result<Unit> {
+        val req = UpgradeOfferResponseRequest(
+            userId = userId, currentProductId = currentProductId,
+            targetProductId = targetProductId, outcome = outcome,
+        )
+        val body = json.encodeToString(UpgradeOfferResponseRequest.serializer(), req)
+        return http.post("/v1/iap/upgrade-offer/respond/", body).map { }
     }
 
     /**
@@ -169,12 +206,15 @@ internal class Backend(
 
     /**
      * `POST /v1/iap/upgrade-offer/execute/` — server-side executes an accepted
-     * web→web plan switch (Stripe `modify` — no WebView). Mirrors iOS
-     * `Backend.executeUpgradeOffer`.
+     * web→web plan switch (Stripe `modify` — no WebView), or returns the metadata
+     * for a StoreKit→web upgrade checkout. Mirrors iOS `Backend.executeUpgradeOffer`.
+     *
+     * Wire body field names are `current_product_id` / `target_product_id` (the
+     * backend handler reads exactly those — `from_*`/`to_*` were never accepted).
      */
-    suspend fun executeUpgradeOffer(userId: String, fromProductId: String, toProductId: String): Result<ExecuteUpgradeResponse> {
-        val body =
-            """{"user_id":"${esc(userId)}","from_product_id":"${esc(fromProductId)}","to_product_id":"${esc(toProductId)}"}"""
+    suspend fun executeUpgradeOffer(userId: String, currentProductId: String, targetProductId: String): Result<ExecuteUpgradeResponse> {
+        val req = ExecuteUpgradeRequest(userId = userId, currentProductId = currentProductId, targetProductId = targetProductId)
+        val body = json.encodeToString(ExecuteUpgradeRequest.serializer(), req)
         return http.post("/v1/iap/upgrade-offer/execute/", body).mapDecode(ExecuteUpgradeResponse.serializer())
     }
 
@@ -262,10 +302,62 @@ internal class Backend(
 }
 
 @Serializable
-internal data class PauseResponse(@SerialName("resumes_at") val resumesAt: String? = null)
+internal data class PauseResponse(
+    val success: Boolean = false,
+    val status: String? = null,
+    @SerialName("paused_at") val pausedAt: String? = null,
+    @SerialName("resumes_at") val resumesAt: String? = null,
+)
+
+/**
+ * Response from `POST /v1/iap/upgrade-offer/execute/`. The handler returns one of
+ * two shapes keyed by `upgrade_type`: `web_to_web` carries [entitlement];
+ * `storekit_to_web` carries [targetProductId] + [cancelInstructions] + [metadata]
+ * (the SDK then drives a checkout for `target_product_id`).
+ */
+@Serializable
+internal data class ExecuteUpgradeResponse(
+    val success: Boolean = false,
+    @SerialName("upgrade_type") val upgradeType: String? = null,
+    val entitlement: UpgradeEntitlement? = null,
+    @SerialName("target_product_id") val targetProductId: String? = null,
+    @SerialName("cancel_instructions") val cancelInstructions: String? = null,
+    val metadata: JsonObject? = null,
+) {
+    /** The product id the user ended up on (web→web) or should check out for (storekit→web). */
+    val newProductId: String? get() = entitlement?.productId ?: targetProductId
+}
 
 @Serializable
-internal data class ExecuteUpgradeResponse(@SerialName("new_product_id") val newProductId: String)
+internal data class UpgradeEntitlement(
+    @SerialName("product_id") val productId: String? = null,
+    val status: String? = null,
+    @SerialName("is_active") val isActive: Boolean = false,
+    @SerialName("expires_at") val expiresAt: String? = null,
+)
+
+@Serializable
+internal data class ExecuteUpgradeRequest(
+    @SerialName("user_id") val userId: String,
+    @SerialName("current_product_id") val currentProductId: String,
+    @SerialName("target_product_id") val targetProductId: String,
+)
+
+@Serializable
+internal data class CancelFlowResponseRequest(
+    @SerialName("user_id") val userId: String,
+    val outcome: String,
+    @SerialName("product_id") val productId: String? = null,
+    @SerialName("variant_id") val variantId: Int? = null,
+)
+
+@Serializable
+internal data class UpgradeOfferResponseRequest(
+    @SerialName("user_id") val userId: String,
+    @SerialName("current_product_id") val currentProductId: String,
+    @SerialName("target_product_id") val targetProductId: String,
+    val outcome: String,
+)
 
 @Serializable
 internal data class CheckoutConfigRequest(

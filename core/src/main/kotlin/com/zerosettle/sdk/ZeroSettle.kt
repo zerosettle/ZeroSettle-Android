@@ -441,6 +441,8 @@ public object ZeroSettle {
                     is com.zerosettle.sdk.offers.OfferManager.OfferEvent.Accepted -> _events.tryEmit(ZeroSettleEvent.OfferAccepted(e.productId))
                     is com.zerosettle.sdk.offers.OfferManager.OfferEvent.Dismissed -> _events.tryEmit(ZeroSettleEvent.OfferDismissed(e.productId))
                     is com.zerosettle.sdk.offers.OfferManager.OfferEvent.Completed -> _events.tryEmit(ZeroSettleEvent.MigrationCompleted(e.productId))
+                    is com.zerosettle.sdk.offers.OfferManager.OfferEvent.EvaluationFailed ->
+                        _events.tryEmit(ZeroSettleEvent.OfferEvaluationFailed(e.error.message ?: "offer evaluation failed"))
                 }
             },
             executeUpgradeOffer = { from, to -> be.executeUpgradeOffer(uid, from, to).map { } },
@@ -475,21 +477,21 @@ public object ZeroSettle {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured))
             .executeUpgradeOffer(uid, fromProductId, toProductId)
-            .map { it.newProductId }
+            .mapCatching { it.newProductId ?: throw ZeroSettleError.BackendError(statusCode = 200, body = "upgrade response missing product id") }
             .onSuccess { scope.scope.launch { restoreEntitlements() }; entitlementPoller?.pollNow() }
     }
 
     /**
      * Record that a migration offer converted (`POST /v1/iap/migration-converted/`).
-     * [source] is `[Offer.SourceStorefront.PLAY_STORE]` for a Play→web migration,
-     * `[Offer.SourceStorefront.STORE_KIT]` for a StoreKit→web one. [OfferManager]
+     * [source] is `[UserOffer.SourceStorefront.PLAY_STORE]` for a Play→web migration,
+     * `[UserOffer.SourceStorefront.STORE_KIT]` for a StoreKit→web one. [OfferManager]
      * calls this automatically; exposed here for headless / custom-WebView callers.
      */
-    public suspend fun trackMigrationConversion(source: com.zerosettle.sdk.models.Offer.SourceStorefront): Result<Unit> {
+    public suspend fun trackMigrationConversion(source: com.zerosettle.sdk.models.UserOffer.SourceStorefront): Result<Unit> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val wire = when (source) {
-            com.zerosettle.sdk.models.Offer.SourceStorefront.PLAY_STORE -> "play_store"
-            com.zerosettle.sdk.models.Offer.SourceStorefront.STORE_KIT -> "store_kit"
+            com.zerosettle.sdk.models.UserOffer.SourceStorefront.PLAY_STORE -> "play_store"
+            com.zerosettle.sdk.models.UserOffer.SourceStorefront.STORE_KIT -> "store_kit"
         }
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).trackMigrationConversion(uid, wire)
     }

@@ -21,7 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.zerosettle.sdk.models.Offer
+import com.zerosettle.sdk.models.UserOffer
 import com.zerosettle.sdk.offers.OfferManager
 import com.zerosettle.ui.theme.LocalZeroSettleStyles
 import kotlinx.coroutines.launch
@@ -31,7 +31,9 @@ import kotlinx.coroutines.launch
  * [OfferManager.state] / [OfferManager.offerData] / [OfferManager.checkoutError] and
  * renders the offer card (Switch-now / Not-now), an "almost done" card while
  * `ACCEPTED`, and a congratulations card when `COMPLETED`. Renders nothing while
- * `LOADING` / `INELIGIBLE` / `DISMISSED`.
+ * `LOADING` / `INELIGIBLE` / `DISMISSED` / `ERROR` (an `ERROR` is surfaced via
+ * [onError] and the host's `ZeroSettle.events` — the tip stays quiet rather than
+ * showing a broken card).
  *
  * Auto-bookkeeping: tapping the CTA calls [OfferManager.acceptOffer]; the manager
  * drives every state transition. For migrations / store→web upgrades the manager also
@@ -77,7 +79,7 @@ public fun ZeroSettleOfferTip(
 @Composable
 public fun ZeroSettleOfferTipContent(
     state: OfferManager.OfferState,
-    offer: Offer.OfferData,
+    offer: UserOffer.OfferData,
     onAccept: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
@@ -92,6 +94,8 @@ public fun ZeroSettleOfferTipContent(
     val bodyStyle = styles.offerBodyStyle ?: MaterialTheme.typography.bodyMedium
     val ctaStyle = styles.offerCtaStyle ?: MaterialTheme.typography.labelLarge
 
+    val display = offer.display
+
     @Composable
     fun card(content: @Composable () -> Unit) = Card(
         modifier = modifier.fillMaxWidth(),
@@ -99,31 +103,34 @@ public fun ZeroSettleOfferTipContent(
         colors = CardDefaults.cardColors(containerColor = surface),
     ) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() } }
 
+    fun String.orElse(fallback: String): String = ifBlank { fallback }
+
     when (state) {
         OfferManager.OfferState.LOADING,
         OfferManager.OfferState.INELIGIBLE,
-        OfferManager.OfferState.DISMISSED -> Unit
+        OfferManager.OfferState.DISMISSED,
+        OfferManager.OfferState.ERROR -> Unit
 
         OfferManager.OfferState.ELIGIBLE,
         OfferManager.OfferState.PRESENTED -> card {
-            Text(offer.display.offerTitleOrDefault("Save ${offer.savingsPercent}%"), style = titleStyle)
-            Text(offer.display.offerMessageOrDefault("Switch to direct billing and save."), style = bodyStyle)
+            Text((display?.title ?: "").orElse("Save ${offer.savingsPercent}%"), style = titleStyle)
+            Text((display?.body ?: "").orElse("Switch to direct billing and save."), style = bodyStyle)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onAccept, colors = ButtonDefaults.buttonColors(containerColor = accent)) {
-                    Text(offer.display.offerCtaOrDefault("Switch now"), style = ctaStyle)
+                    Text((display?.ctaText ?: "").orElse("Switch now"), style = ctaStyle)
                 }
-                TextButton(onClick = onDismiss) { Text("Not now") }
+                TextButton(onClick = onDismiss) { Text((display?.dismissText ?: "").orElse("Not now")) }
             }
         }
 
         OfferManager.OfferState.ACCEPTED -> card {
-            Text(offer.display.acceptedTitleOrDefault("Almost done"), style = titleStyle)
-            Text(offer.display.acceptedMessageOrDefault("Finishing up your switch…"), style = bodyStyle)
+            Text((display?.acceptedTitle ?: "").orElse("Almost done"), style = titleStyle)
+            Text((display?.acceptedBody ?: "").orElse("Finishing up your switch…"), style = bodyStyle)
         }
 
         OfferManager.OfferState.COMPLETED -> if (showCompletedCard) card {
-            Text(offer.display.completedTitleOrDefault("All set!"), style = titleStyle)
-            Text(offer.display.completedMessageOrDefault("You're now billed directly."), style = bodyStyle)
+            Text((display?.completedTitle ?: "").orElse("All set!"), style = titleStyle)
+            Text((display?.completedBody ?: "").orElse("You're now billed directly."), style = bodyStyle)
         }
     }
 }
