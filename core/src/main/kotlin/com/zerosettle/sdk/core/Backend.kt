@@ -60,6 +60,44 @@ internal class Backend(
     suspend fun createCheckoutConfig(body: String): Result<String> =
         http.post("/v1/iap/checkout-configs/", body)
 
+    /**
+     * `POST /v1/iap/checkout-configs/` — typed variant. For a Play→web migration
+     * pass [playPurchaseToken]; otherwise null. Maps a `503 PLAY_API_UNREACHABLE`
+     * to [ZeroSettleError.PlayApiUnreachable] so callers can surface a retry hint.
+     */
+    suspend fun createWebCheckout(
+        userId: String,
+        productId: String,
+        playPurchaseToken: String?,
+        customerName: String?,
+        customerEmail: String?,
+    ): Result<CheckoutConfigResponse> {
+        val req = CheckoutConfigRequest(
+            userId = userId, productId = productId,
+            playPurchaseToken = playPurchaseToken,
+            customerName = customerName, customerEmail = customerEmail,
+        )
+        val body = json.encodeToString(CheckoutConfigRequest.serializer(), req)
+        return http.post("/v1/iap/checkout-configs/", body).mapCheckoutBody()
+    }
+
+    private fun Result<String>.mapCheckoutBody(): Result<CheckoutConfigResponse> = fold(
+        onSuccess = {
+            try {
+                Result.success(json.decodeFromString(CheckoutConfigResponse.serializer(), it))
+            } catch (e: Throwable) {
+                Result.failure(ZeroSettleError.BackendError(statusCode = 200, body = "decode_failed: ${e.message}"))
+            }
+        },
+        onFailure = { err ->
+            if (err is ZeroSettleError.BackendError && err.statusCode == 503 && err.body.contains("PLAY_API_UNREACHABLE")) {
+                Result.failure(ZeroSettleError.PlayApiUnreachable)
+            } else {
+                Result.failure(err)
+            }
+        },
+    )
+
     /** `POST /v1/iap/migration-converted/` — records that a migration offer converted. */
     suspend fun migrationConverted(userId: String, source: String): Result<Unit> {
         val body = """{"user_id":"${esc(userId)}","source":"${esc(source)}"}"""
@@ -147,6 +185,22 @@ internal class Backend(
             onFailure = { Result.failure(it) },
         )
 }
+
+@Serializable
+internal data class CheckoutConfigRequest(
+    @SerialName("user_id") val userId: String,
+    @SerialName("product_id") val productId: String,
+    @SerialName("play_purchase_token") val playPurchaseToken: String? = null,
+    @SerialName("customer_name") val customerName: String? = null,
+    @SerialName("customer_email") val customerEmail: String? = null,
+)
+
+@Serializable
+internal data class CheckoutConfigResponse(
+    @SerialName("checkout_url") val checkoutUrl: String,
+    @SerialName("checkout_presentation") val checkoutPresentation: com.zerosettle.sdk.checkout.CheckoutPresentation? = null,
+    @SerialName("stripe_customer_id") val stripeCustomerId: String? = null,
+)
 
 @Serializable
 internal data class PlaySyncRequest(
