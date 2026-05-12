@@ -11,11 +11,11 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -47,6 +47,16 @@ class SampleActivity : ComponentActivity() {
                     val currentRoute = backStack?.destination?.route
                     val showBottomBar = bootstrapped && currentRoute != null && currentRoute != Routes.SIGN_IN
 
+                    // If identity is dropped (e.g. logout from the Debug screen), return to sign-in.
+                    LaunchedEffect(bootstrapped, currentRoute) {
+                        if (!bootstrapped && currentRoute != null && currentRoute != Routes.SIGN_IN) {
+                            nav.navigate(Routes.SIGN_IN) {
+                                popUpTo(0) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        }
+                    }
+
                     Scaffold(
                         bottomBar = {
                             if (showBottomBar) {
@@ -57,7 +67,7 @@ class SampleActivity : ComponentActivity() {
                                             onClick = {
                                                 if (currentRoute != tab.route) {
                                                     nav.navigate(tab.route) {
-                                                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                                                        popUpTo(Routes.HOME) { saveState = true }
                                                         launchSingleTop = true
                                                         restoreState = true
                                                     }
