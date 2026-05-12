@@ -194,6 +194,45 @@ public object ZeroSettle {
         return AppAccountToken.derive(userId = uid, packageName = pkg)
     }
 
+    // ─── Public catalog / entitlement helpers ───────────────────────────────
+
+    /**
+     * Re-fetch the canonical product catalog. Updates [products] on success.
+     * Returns `Result.failure(ZeroSettleError.UserNotIdentified)` if [identify]
+     * hasn't been called.
+     */
+    public suspend fun fetchProducts(): Result<ProductCatalog> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        return be.fetchProducts(uid).onSuccess { _products.value = it.products }
+    }
+
+    /**
+     * Re-fetch active entitlements. Updates [entitlements] / [pendingClaims] and
+     * emits [ZeroSettleEvent.EntitlementsRefreshed] on success. Returns the active
+     * entitlement list, or `Result.failure(ZeroSettleError.UserNotIdentified)`.
+     */
+    public suspend fun restoreEntitlements(): Result<List<Entitlement>> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        return be.fetchEntitlements(uid).map { resp ->
+            _entitlements.value = resp.entitlements
+            _pendingClaims.value = resp.pendingClaims
+            _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = resp.entitlements.size))
+            resp.entitlements
+        }
+    }
+
+    /**
+     * Fetch the identified user's full transaction history as raw JSON
+     * (`GET /v1/iap/transaction-history/`). The typed model lands in a later phase.
+     */
+    public suspend fun fetchTransactionHistory(): Result<String> {
+        val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        return be.fetchTransactionHistory(uid)
+    }
+
     // ─── Test surface ───────────────────────────────────────────────────────
 
     /** Test-only: reset all state. */
