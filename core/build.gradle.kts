@@ -11,7 +11,10 @@ android {
     defaultConfig {
         minSdk = 23
         consumerProguardFiles("consumer-rules.pro")
+        buildConfigField("String", "ZEROSETTLE_SDK_VERSION", "\"${project.findProperty("VERSION_NAME")}\"")
     }
+
+    buildFeatures { buildConfig = true }
 
     buildTypes {
         release {
@@ -65,7 +68,11 @@ dependencies {
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()
-    coordinates("io.zerosettle", "zerosettle-android", "1.0.0")
+    coordinates(
+        project.findProperty("GROUP") as String,
+        "zerosettle-android",
+        project.findProperty("VERSION_NAME") as String,
+    )
 
     pom {
         name.set("ZeroSettle Android SDK")

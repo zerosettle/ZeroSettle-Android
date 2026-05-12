@@ -66,7 +66,11 @@ dependencies {
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()
-    coordinates("io.zerosettle", "zerosettle-android-ui", "1.0.0")
+    coordinates(
+        project.findProperty("GROUP") as String,
+        "zerosettle-android-ui",
+        project.findProperty("VERSION_NAME") as String,
+    )
     pom {
         name.set("ZeroSettle Android UI")
         description.set("Optional Compose components for ZeroSettle: offer tip, pending-action banner, checkout sheet, cancel flow, upgrade offer.")

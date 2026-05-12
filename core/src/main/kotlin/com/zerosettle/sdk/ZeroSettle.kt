@@ -60,8 +60,10 @@ public object ZeroSettle {
         private set
 
     internal val scope: ZeroSettleScope = ZeroSettleScope()
-    private const val SDK_VERSION = "1.0.0"
     private const val DEFAULT_BASE_URL = "https://api.zerosettle.com"
+
+    /** The published SDK version (wired from `BuildConfig`, set by `gradle.properties`). */
+    public val sdkVersion: String get() = BuildConfig.ZEROSETTLE_SDK_VERSION
 
     /** Call once at `Application.onCreate()`. Safe to call again to swap config. */
     public fun configure(context: Context, config: ZeroSettleConfig) {
@@ -77,7 +79,7 @@ public object ZeroSettle {
         this.backend = Backend(
             baseUrl = config.baseUrlOverride ?: DEFAULT_BASE_URL,
             publishableKey = config.publishableKey,
-            sdkVersion = SDK_VERSION,
+            sdkVersion = sdkVersion,
         )
         this.entitlementPoller = com.zerosettle.sdk.entitlements.EntitlementPoller(
             backend = this.backend!!,
