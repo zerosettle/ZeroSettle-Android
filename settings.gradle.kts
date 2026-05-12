@@ -21,5 +21,3 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ZeroSettle-Android"
-include(":sdk")
-include(":sample")
