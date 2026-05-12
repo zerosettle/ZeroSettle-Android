@@ -4,6 +4,7 @@
     <application
         android:name=".SampleApplication"
         android:label="ZeroSettle Sample"
+        android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".SampleActivity"

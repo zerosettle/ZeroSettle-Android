@@ -76,7 +76,9 @@ fun DebugScreen() {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Config", style = MaterialTheme.typography.titleSmall)
                 Text("publishableKey = ${maskKey(SampleConfig.PUBLISHABLE_KEY)}")
-                Text("baseUrlOverride = ${SampleConfig.BASE_URL_OVERRIDE ?: "(production default)"}")
+                Text("env = ${SampleConfig.loadEnv(ctx).label}")
+                Text("baseUrl = ${SampleConfig.effectiveBaseUrl(ctx)}")
+                Text("(change env on the Sign-in screen)")
                 Text("sdkVersion = ${ZeroSettle.sdkVersion}")
                 Text("configured=$configured  bootstrapped=$bootstrapped  pendingCheckout=$pendingCheckout")
             }
