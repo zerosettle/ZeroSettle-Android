@@ -4,6 +4,9 @@ import android.app.Activity
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.Purchase
 import com.zerosettle.sdk.core.Backend
@@ -107,7 +110,18 @@ internal class PlayBillingCoordinator(
             override fun onAvailable(network: Network) { scope.launch { processor.retryQueued() } }
         }
         networkCallback = cb
-        runCatching { cm.registerDefaultNetworkCallback(cb) }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.registerDefaultNetworkCallback(cb)
+            } else {
+                // API 23: no registerDefaultNetworkCallback — register against an
+                // internet-capable request instead (registerNetworkCallback is API 21+).
+                val req = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(req, cb)
+            }
+        }
     }
 
     /** logout(): clear the queue, end the Billing connection, unregister the callback. */
