@@ -7,7 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import com.zerosettle.sdk.models.Offer
+import com.zerosettle.sdk.models.UserOffer
 import com.zerosettle.sdk.offers.OfferManager
 import com.zerosettle.ui.theme.ZeroSettleTheme
 import org.junit.Assert.assertTrue
@@ -20,17 +20,21 @@ import org.robolectric.RobolectricTestRunner
 class ZeroSettleOfferTipTest {
     @get:Rule val composeRule = createComposeRule()
 
-    private val migrationOffer = Offer.OfferData(
-        flowType = Offer.FlowType.MIGRATION, upgradeType = null,
-        sourceStorefront = Offer.SourceStorefront.PLAY_STORE,
-        productId = "pro_monthly", eligibleProductIds = listOf("pro_monthly"),
+    private val migrationOffer = UserOffer.OfferData(
+        actionType = UserOffer.ActionType.MIGRATE_STOREKIT_TO_WEB,
+        isEligible = true,
+        checkoutProductId = "pro_monthly",
+        fromProductId = "pro_monthly",
         savingsPercent = 20,
-        display = Offer.OfferDisplay(
-            "Save 20%", "Switch to direct billing", "Switch now",
-            "Almost done", "Finishing up", "Continue", "All set!", "Welcome",
+        display = UserOffer.OfferDisplay(
+            title = "Save 20%", body = "Switch to direct billing", ctaText = "Switch now",
+            dismissText = "Not now", acceptedTitle = "Almost done", acceptedBody = "Finishing up",
+            completedTitle = "All set!", completedBody = "Welcome",
         ),
-        freeTrialDays = 7, minSubscriptionDays = 14, maxSubscriptionDays = null,
-        rolloutPercent = 100, checkoutPresentation = Offer.CheckoutPresentation.CUSTOM_TAB,
+        freeTrialDays = 7, minSubscriptionDays = 14,
+        rolloutPercent = 100, requiresAppleCancel = true,
+        checkoutPresentation = UserOffer.CheckoutPresentation.WEBVIEW,
+        source = UserOffer.SourceStorefront.PLAY_STORE,
     )
 
     private fun set(state: OfferManager.OfferState, onAccept: () -> Unit = {}, onDismiss: () -> Unit = {}) {

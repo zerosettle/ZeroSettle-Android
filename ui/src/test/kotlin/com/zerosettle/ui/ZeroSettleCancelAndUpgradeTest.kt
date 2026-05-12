@@ -6,7 +6,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.zerosettle.sdk.models.CancelFlow
-import com.zerosettle.sdk.models.Offer
 import com.zerosettle.sdk.models.UpgradeOffer
 import com.zerosettle.ui.theme.ZeroSettleTheme
 import org.junit.Assert.assertEquals
@@ -55,7 +54,7 @@ class ZeroSettleCancelAndUpgradeTest {
     @Test fun upgradeOffer_acceptCallsResultAccepted() {
         val cfg = UpgradeOffer.Config(
             fromProductId = "pro_monthly", toProductId = "pro_yearly", savingsPercent = 20,
-            display = Offer.OfferDisplay("Go yearly", "Save 20% with annual billing", "Upgrade", "Done", "", "", "", ""),
+            display = UpgradeOffer.Display("Go yearly", "Save 20% with annual billing", "Upgrade", "Done", "", "", "", ""),
         )
         var result: UpgradeOffer.Result? = null
         composeRule.setContent { MaterialTheme { ZeroSettleTheme { ZeroSettleUpgradeOffer(config = cfg, onResult = { result = it }) } } }
@@ -69,7 +68,7 @@ class ZeroSettleCancelAndUpgradeTest {
     @Test fun upgradeOffer_notNowCallsDismissed() {
         val cfg = UpgradeOffer.Config(
             fromProductId = "a", toProductId = "b", savingsPercent = 10,
-            display = Offer.OfferDisplay("T", "M", "Upgrade", "", "", "", "", ""),
+            display = UpgradeOffer.Display("T", "M", "Upgrade", "", "", "", "", ""),
         )
         var result: UpgradeOffer.Result? = null
         composeRule.setContent { MaterialTheme { ZeroSettleTheme { ZeroSettleUpgradeOffer(config = cfg, onResult = { result = it }) } } }
