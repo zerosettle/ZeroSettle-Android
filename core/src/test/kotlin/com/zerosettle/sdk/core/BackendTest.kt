@@ -49,7 +49,14 @@ class BackendTest {
     }
 
     @Test fun fetchUserOffer_decodesResponse() = runTest {
-        server.enqueue(MockResponse().setBody("""{"is_eligible":false}"""))
+        server.enqueue(
+            MockResponse().setBody(
+                """{"user_id":"u1","app_id":1,"is_sandbox":true,
+                   "subscription":{"type":"none"},
+                   "offer":{"action_type":"no_action","is_eligible":false,"checkout_product_id":""},
+                   "server_time":"2026-05-12T00:00:00Z"}""",
+            ),
+        )
         val res = backend.fetchUserOffer(userId = "u1")
         assertThat(res.getOrNull()?.isEligible).isFalse()
         assertThat(server.takeRequest().path).contains("/v1/iap/user-offer/")
