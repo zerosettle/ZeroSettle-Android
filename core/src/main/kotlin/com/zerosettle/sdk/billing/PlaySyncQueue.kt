@@ -76,6 +76,12 @@ public class PlaySyncQueue(private val context: Context) {
         public fun backoffDelayMillis(attemptCount: Int): Long? =
             if (attemptCount in BACKOFF_MILLIS.indices) BACKOFF_MILLIS[attemptCount] else null
 
-        public fun isAbandoned(item: PendingPurchaseSync): Boolean = item.attemptCount >= MAX_ATTEMPTS
+        /**
+         * True once the row has exhausted the [backoffDelayMillis] schedule (attempt
+         * index ≥ schedule length, currently 4). At that point the [PurchaseSyncProcessor]
+         * stops scheduling fresh retries and either defensive-acks (non-strict) or emits
+         * a terminal [com.zerosettle.sdk.core.ZeroSettleEvent.SyncFailed].
+         */
+        public fun isAbandoned(item: PendingPurchaseSync): Boolean = backoffDelayMillis(item.attemptCount) == null
     }
 }
