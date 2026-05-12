@@ -98,10 +98,60 @@ internal class Backend(
         },
     )
 
-    /** `POST /v1/iap/migration-converted/` — records that a migration offer converted. */
-    suspend fun migrationConverted(userId: String, source: String): Result<Unit> {
+    /**
+     * `POST /v1/iap/migration-converted/` — records that a migration offer converted.
+     * [source] is `"play_store"` for a Play→web migration, `"store_kit"` otherwise
+     * (chunk-3 contract). Mirrors iOS `Backend.trackMigrationConversion`.
+     */
+    suspend fun trackMigrationConversion(userId: String, source: String): Result<Unit> {
         val body = """{"user_id":"${esc(userId)}","source":"${esc(source)}"}"""
         return http.post("/v1/iap/migration-converted/", body).map { }
+    }
+
+    // ─── Subscription management ───────────────────────────────────────────
+
+    /** `POST /v1/iap/cancel-subscription/` — cancels a web-checkout subscription. */
+    suspend fun cancelSubscription(userId: String, productId: String, immediate: Boolean): Result<Unit> {
+        val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}","immediate":$immediate}"""
+        return http.post("/v1/iap/cancel-subscription/", body).map { }
+    }
+
+    /** `POST /v1/iap/pause-subscription/` — pauses a web-checkout subscription; returns the resume date. */
+    suspend fun pauseSubscription(userId: String, productId: String, pauseDurationDays: Int?): Result<PauseResponse> {
+        val days = pauseDurationDays?.toString() ?: "null"
+        val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}","pause_duration_days":$days}"""
+        return http.post("/v1/iap/pause-subscription/", body).mapDecode(PauseResponse.serializer())
+    }
+
+    /** `POST /v1/iap/resume-subscription/` — resumes a paused web-checkout subscription. */
+    suspend fun resumeSubscription(userId: String, productId: String): Result<Unit> {
+        val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}"}"""
+        return http.post("/v1/iap/resume-subscription/", body).map { }
+    }
+
+    // ─── Cancel flow ───────────────────────────────────────────────────────
+
+    /** `GET /v1/iap/cancel-flow-config/?user_id=…` — server-driven retention survey + save offer. */
+    suspend fun fetchCancelFlowConfig(userId: String): Result<com.zerosettle.sdk.models.CancelFlow.Config> =
+        http.get("/v1/iap/cancel-flow-config/?user_id=${enc(userId)}")
+            .mapDecode(com.zerosettle.sdk.models.CancelFlow.Config.serializer())
+
+    /** `POST /v1/iap/cancel-flow-save-offer/` — accepts the in-cancel-flow save offer. */
+    suspend fun acceptSaveOffer(userId: String, productId: String): Result<com.zerosettle.sdk.models.CancelFlow.SaveOfferResult> {
+        val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}"}"""
+        return http.post("/v1/iap/cancel-flow-save-offer/", body)
+            .mapDecode(com.zerosettle.sdk.models.CancelFlow.SaveOfferResult.serializer())
+    }
+
+    // ─── Upgrade offer ─────────────────────────────────────────────────────
+
+    /** `GET /v1/iap/upgrade-offer-config/?user_id=…[&product_id=…]` — in-app plan-switch offer config. */
+    suspend fun fetchUpgradeOfferConfig(userId: String, productId: String?): Result<com.zerosettle.sdk.models.UpgradeOffer.Config> {
+        val path = buildString {
+            append("/v1/iap/upgrade-offer-config/?user_id=").append(enc(userId))
+            productId?.let { append("&product_id=").append(enc(it)) }
+        }
+        return http.get(path).mapDecode(com.zerosettle.sdk.models.UpgradeOffer.Config.serializer())
     }
 
     /**
@@ -113,10 +163,14 @@ internal class Backend(
 
     /**
      * `POST /v1/iap/upgrade-offer/execute/` — server-side executes an accepted
-     * in-app upgrade offer. The caller supplies the body; returns the raw JSON.
+     * web→web plan switch (Stripe `modify` — no WebView). Mirrors iOS
+     * `Backend.executeUpgradeOffer`.
      */
-    suspend fun executeUpgradeOffer(body: String): Result<String> =
-        http.post("/v1/iap/upgrade-offer/execute/", body)
+    suspend fun executeUpgradeOffer(userId: String, fromProductId: String, toProductId: String): Result<ExecuteUpgradeResponse> {
+        val body =
+            """{"user_id":"${esc(userId)}","from_product_id":"${esc(fromProductId)}","to_product_id":"${esc(toProductId)}"}"""
+        return http.post("/v1/iap/upgrade-offer/execute/", body).mapDecode(ExecuteUpgradeResponse.serializer())
+    }
 
     /** `POST /v1/iap/claim-entitlement/` — explicit cross-account ownership transfer. */
     suspend fun claimEntitlement(
@@ -200,6 +254,12 @@ internal class Backend(
             onFailure = { Result.failure(it) },
         )
 }
+
+@Serializable
+internal data class PauseResponse(@SerialName("resumes_at") val resumesAt: String? = null)
+
+@Serializable
+internal data class ExecuteUpgradeResponse(@SerialName("new_product_id") val newProductId: String)
 
 @Serializable
 internal data class CheckoutConfigRequest(
