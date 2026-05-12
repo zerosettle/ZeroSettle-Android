@@ -591,4 +591,12 @@ public object ZeroSettle {
 
     /** Test-only: the Play sync queue owned by the coordinator (requires `syncPlayPurchases = true`). */
     internal fun playSyncQueueForTesting(): com.zerosettle.sdk.billing.PlaySyncQueue = playCoordinator!!.queue
+
+    /**
+     * Debug only: the number of Play purchases currently queued for retry by the
+     * persistent sync queue. Returns 0 when Play sync is disabled or no coordinator
+     * exists. Public so a separate Gradle module (e.g. the `:sample` debug screen) can
+     * inspect internal state; not part of the supported product surface.
+     */
+    public suspend fun playSyncQueueDepthForDebug(): Int = playCoordinator?.queue?.pending()?.size ?: 0
 }
