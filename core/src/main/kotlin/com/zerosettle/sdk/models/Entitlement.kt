@@ -30,6 +30,8 @@ public data class Entitlement(
     @SerialName("product_id") val productId: String,
     val source: EntitlementSource,
     @SerialName("is_active") val isActive: Boolean,
+    // kotlinx-serialization's compiler plugin accesses this private backing field
+    // directly — do not "clean up" by inlining it into [status].
     @SerialName("status") private val _statusRaw: String,
     @SerialName("product_type") val productType: String? = null,
     @SerialName("paused_at") val pausedAt: String? = null,
