@@ -45,7 +45,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
-    implementation(libs.billing.ktx)
+    api(libs.billing.ktx)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.activity.ktx)
