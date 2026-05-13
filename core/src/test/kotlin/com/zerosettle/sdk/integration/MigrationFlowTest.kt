@@ -75,7 +75,7 @@ class MigrationFlowTest {
         server.takeRequest() // drain the user-offer request
 
         // acceptOffer() → POST /v1/iap/checkout-configs/ with play_purchase_token → checkout URL.
-        server.enqueue(MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.com/c/mig"}"""))
+        server.enqueue(MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.io/c/mig"}"""))
         val accept = mgr.acceptOffer()
         assertThat(accept.isSuccess).isTrue()
         assertThat(mgr.state.first()).isEqualTo(OfferManager.OfferState.ACCEPTED)

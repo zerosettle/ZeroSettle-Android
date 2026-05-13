@@ -72,7 +72,7 @@ class ZeroSettleWebPurchaseTest {
         server.dispatcher = routeBy(mapOf(
             "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
             "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
-            "/v1/iap/checkout-configs/" to { MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.com/c/abc"}""") },
+            "/v1/iap/checkout-configs/" to { MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.io/c/abc"}""") },
             "/v1/iap/transactions/" to { MockResponse().setBody(
                 """{"id":"txn_1","product_id":"pro_monthly","status":"completed","source":"web_checkout","purchased_at":"2026-05-11T00:00:00Z"}""",
             ) },

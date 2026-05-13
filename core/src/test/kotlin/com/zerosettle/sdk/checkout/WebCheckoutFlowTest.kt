@@ -31,6 +31,6 @@ class WebCheckoutFlowTest {
 
     @Test fun isCallbackUrl_matchesScheme() {
         assertThat(WebCheckoutFlow.isCallbackUrl("zerosettle://checkout/return?x=1")).isTrue()
-        assertThat(WebCheckoutFlow.isCallbackUrl("https://api.zerosettle.com/checkout")).isFalse()
+        assertThat(WebCheckoutFlow.isCallbackUrl("https://api.zerosettle.io/checkout")).isFalse()
     }
 }

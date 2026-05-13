@@ -30,7 +30,18 @@ public object AppAccountToken {
     /** RFC 4122 §C: NAMESPACE_DNS. */
     private val NAMESPACE_DNS: UUID = UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
-    /** Root namespace: `uuid5(NAMESPACE_DNS, "appaccounttoken.zerosettle.com")`. */
+    /**
+     * Root namespace: `uuid5(NAMESPACE_DNS, "appaccounttoken.zerosettle.com")`.
+     *
+     * NOTE: the `.com` TLD here is **intentional** and must NOT be changed
+     * to `.io` — this string is the UUIDv5 namespace input, not a real DNS
+     * hostname. It must remain byte-identical to iOS Kit's
+     * `AppAccountToken.swift` (`"appaccounttoken.zerosettle.com"`) and the
+     * backend's `api/services/appaccount_token.py` to produce matching
+     * tokens cross-platform. The runtime API base URL is `.io` (see
+     * [ZeroSettle.DEFAULT_BASE_URL]); only this namespace constant uses
+     * the legacy `.com` string.
+     */
     internal val ROOT_NAMESPACE: UUID by lazy {
         uuidV5(NAMESPACE_DNS, "appaccounttoken.zerosettle.com")
     }

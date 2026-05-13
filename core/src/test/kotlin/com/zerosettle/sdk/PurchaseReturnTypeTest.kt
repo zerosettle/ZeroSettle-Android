@@ -75,7 +75,7 @@ class PurchaseReturnTypeTest {
                     path.startsWith("/v1/iap/entitlements/") ->
                         MockResponse().setBody("""{"entitlements":[]}""")
                     path.startsWith("/v1/iap/checkout-configs/") ->
-                        MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.com/c/abc"}""")
+                        MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.io/c/abc"}""")
                     path.startsWith("/v1/iap/transactions/") ->
                         MockResponse().setBody(
                             """{"id":"txn_1","product_id":"pro_monthly","status":"completed","source":"web_checkout","purchased_at":"2026-05-11T00:00:00Z"}""",

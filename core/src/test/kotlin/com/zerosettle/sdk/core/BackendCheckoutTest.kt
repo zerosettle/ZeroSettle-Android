@@ -25,12 +25,12 @@ class BackendCheckoutTest {
     @After fun tearDown() { server.shutdown() }
 
     @Test fun createWebCheckout_returnsUrlFromResponse() = runTest {
-        server.enqueue(MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.com/c/abc"}"""))
+        server.enqueue(MockResponse().setBody("""{"checkout_url":"https://checkout.zerosettle.io/c/abc"}"""))
         val res = backend.createWebCheckout(
             userId = "u1", productId = "pro_monthly",
             playPurchaseToken = null, customerName = null, customerEmail = null,
         )
-        assertThat(res.getOrNull()?.checkoutUrl).isEqualTo("https://checkout.zerosettle.com/c/abc")
+        assertThat(res.getOrNull()?.checkoutUrl).isEqualTo("https://checkout.zerosettle.io/c/abc")
         val recorded = server.takeRequest()
         assertThat(recorded.path).isEqualTo("/v1/iap/checkout-configs/")
         assertThat(recorded.body.readUtf8()).contains("\"product_id\":\"pro_monthly\"")

@@ -16,13 +16,13 @@ internal object SampleConfig {
 
     /**
      * Backend environments selectable from the Sign-in screen.
-     * `baseUrl == null` → the SDK's built-in default (production, `https://api.zerosettle.com`).
+     * `baseUrl == null` → the SDK's built-in default (production, `https://api.zerosettle.io`).
      * For [CUSTOM] the URL comes from the persisted custom-URL field instead.
      */
     enum class Env(val label: String, val baseUrl: String?) {
         PRODUCTION("Production (live API)", null),
         // Adjust if your staging host differs (Render service URL, custom domain, etc.).
-        STAGING("Staging", "https://api-staging.zerosettle.com"),
+        STAGING("Staging", "https://api-staging.zerosettle.io"),
         // The Android emulator's loopback alias for the host machine's localhost.
         // Requires android:usesCleartextTraffic="true" in the manifest (already set).
         LOCAL_EMULATOR("Local — emulator (10.0.2.2:8000)", "http://10.0.2.2:8000"),
@@ -61,5 +61,5 @@ internal object SampleConfig {
 
     /** Human-readable effective base URL (for display). */
     fun effectiveBaseUrl(ctx: Context): String =
-        resolveBaseUrlOverride(ctx) ?: "https://api.zerosettle.com (SDK default)"
+        resolveBaseUrlOverride(ctx) ?: "https://api.zerosettle.io (SDK default)"
 }

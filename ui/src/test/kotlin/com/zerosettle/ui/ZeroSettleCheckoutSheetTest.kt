@@ -19,7 +19,7 @@ class ZeroSettleCheckoutSheetTest {
         composeRule.setContent {
             MaterialTheme {
                 ZeroSettleTheme {
-                    ZeroSettleCheckoutSheet(checkoutUrl = "https://checkout.zerosettle.com/c/abc", onResult = { })
+                    ZeroSettleCheckoutSheet(checkoutUrl = "https://checkout.zerosettle.io/c/abc", onResult = { })
                 }
             }
         }

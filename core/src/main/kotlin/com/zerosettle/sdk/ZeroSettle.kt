@@ -62,7 +62,7 @@ public object ZeroSettle {
         private set
 
     internal val scope: ZeroSettleScope = ZeroSettleScope()
-    private const val DEFAULT_BASE_URL = "https://api.zerosettle.com"
+    private const val DEFAULT_BASE_URL = "https://api.zerosettle.io"
 
     /** The published SDK version (wired from `BuildConfig`, set by `gradle.properties`). */
     public val sdkVersion: String get() = BuildConfig.ZEROSETTLE_SDK_VERSION
