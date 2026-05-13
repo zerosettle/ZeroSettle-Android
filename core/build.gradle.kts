@@ -125,3 +125,26 @@ mavenPublishing {
         }
     }
 }
+
+// Release-time hard gate: Maven Central will reject uploads that lack a
+// Javadoc JAR. Until Dokka catches up to ASM 9 / Java 17 sealed classes
+// (see the mavenPublishing.configure() block above), every Central upload
+// from this module will fail at the server side. Fail FAST instead —
+// refuse the publish task locally unless an operator explicitly bypasses
+// with -Pzerosettle.bypassJavadocCheck=true (which exists so this gate
+// doesn't block testing the publish pipeline itself). Real release fix
+// is tracked alongside Phase 5 release work in the Flutter parity plan.
+afterEvaluate {
+    tasks.matching { it.name.startsWith("publish") && it.name.contains("Central") }
+        .configureEach {
+            doFirst {
+                require(project.hasProperty("zerosettle.bypassJavadocCheck")) {
+                    "Refusing to publish to Maven Central without a Javadoc JAR. " +
+                        "Dokka skip is active (see mavenPublishing.configure() in " +
+                        "core/build.gradle.kts). Central will reject the upload. " +
+                        "Either re-enable Javadoc generation (publishJavadocJar = true) " +
+                        "or pass -Pzerosettle.bypassJavadocCheck=true to override this gate."
+                }
+            }
+        }
+}

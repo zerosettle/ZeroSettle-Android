@@ -113,3 +113,21 @@ mavenPublishing {
         }
     }
 }
+
+// Release-time hard gate, parallel to :core. See core/build.gradle.kts
+// afterEvaluate block for the rationale; same dokka-skip → Central-reject
+// risk applies to this module's Javadoc-less publishes.
+afterEvaluate {
+    tasks.matching { it.name.startsWith("publish") && it.name.contains("Central") }
+        .configureEach {
+            doFirst {
+                require(project.hasProperty("zerosettle.bypassJavadocCheck")) {
+                    "Refusing to publish :ui to Maven Central without a Javadoc JAR. " +
+                        "Dokka skip is active (see mavenPublishing.configure() above). " +
+                        "Central will reject the upload. Either re-enable Javadoc " +
+                        "generation (publishJavadocJar = true) or pass " +
+                        "-Pzerosettle.bypassJavadocCheck=true to override this gate."
+                }
+            }
+        }
+}
