@@ -65,6 +65,17 @@ dependencies {
 
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+    // Skip Javadoc generation. Same Dokka/ASM 9 incompatibility as :core
+    // (see core/build.gradle.kts for details). :ui doesn't have its own
+    // sealed classes but Dokka still scans transitively. Re-enable when
+    // Dokka supports ASM 9. Tracked with the Phase 5 release work.
+    configure(
+        com.vanniktech.maven.publish.AndroidSingleVariantLibrary(
+            variant = "release",
+            sourcesJar = true,
+            publishJavadocJar = false,
+        )
+    )
     // Sign publications only when GPG signing properties are configured
     // (typically in CI for releases, or in ~/.gradle/gradle.properties for
     // local release work). Local dev `publishToMavenLocal` runs without

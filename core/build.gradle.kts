@@ -67,6 +67,22 @@ dependencies {
 
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+    // Skip Javadoc generation. Reason: Dokka (bundled with AGP 9.0.1 via
+    //   :javaDocReleaseGeneration) uses an older ASM that doesn't support
+    // Java 17 sealed-class PermittedSubclasses, so generation crashes on
+    // sealed classes (e.g., PendingAction):
+    //   UnsupportedOperationException: PermittedSubclasses requires ASM9
+    // Re-enable (publishJavadocJar = true) when Dokka catches up to ASM 9
+    // or after migrating away from Dokka here. Maven Central does require
+    // a Javadoc JAR for release uploads, so the eventual fix is a release
+    // prerequisite — tracked alongside the Phase 5 release work.
+    configure(
+        com.vanniktech.maven.publish.AndroidSingleVariantLibrary(
+            variant = "release",
+            sourcesJar = true,
+            publishJavadocJar = false,
+        )
+    )
     // Sign publications only when GPG signing properties are configured
     // (typically in CI for releases, or in ~/.gradle/gradle.properties for
     // local release work). Local dev `publishToMavenLocal` runs without
