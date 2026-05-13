@@ -67,7 +67,16 @@ dependencies {
 
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
-    signAllPublications()
+    // Sign publications only when GPG signing properties are configured
+    // (typically in CI for releases, or in ~/.gradle/gradle.properties for
+    // local release work). Local dev `publishToMavenLocal` runs without
+    // signing — the cross-repo Flutter plugin workflow consumes those
+    // unsigned local artifacts. Maven Central enforces signed uploads
+    // at the server side, so unsigned dev builds can't accidentally ship.
+    if (project.hasProperty("signing.keyId") ||
+        System.getenv("ORG_GRADLE_PROJECT_signing.keyId") != null) {
+        signAllPublications()
+    }
     coordinates(
         project.findProperty("GROUP") as String,
         "zerosettle-android",

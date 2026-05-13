@@ -55,10 +55,29 @@ and the docs site (<https://docs.zerosettle.io/sdk/android>) for the full refere
 `./gradlew check` — JDK 17 (foojay-provisioned). `./gradlew :sample:assembleDebug` builds
 the demo. `./gradlew :core:assembleRelease :ui:assembleRelease` builds release AARs.
 
+## Local development against downstream consumers
+
+For consumers built in-tree (e.g., the Flutter plugin in ZeroSettle-Flutter), publish to
+the local Maven repo:
+
+```bash
+./gradlew :core:publishToMavenLocal :ui:publishToMavenLocal
+```
+
+This works without GPG signing keys configured — `signAllPublications()` is gated on
+the presence of `signing.keyId` (Gradle property OR `ORG_GRADLE_PROJECT_signing.keyId`
+env var), so local-dev publishes skip signing automatically. Maven Central rejects
+unsigned uploads at the server side, so unsigned local artifacts can't accidentally
+ship to production.
+
 ## Releases
 
 Tagged release from `main` (`vX.Y.Z`); publishes to Maven Central via the Central Portal
 (`com.vanniktech.maven.publish`). v0.15.x is yanked.
+
+Release signing: set `signing.keyId`, `signing.password`, and `signing.secretKeyRingFile`
+in `~/.gradle/gradle.properties` (or `ORG_GRADLE_PROJECT_signing.*` env vars in CI). With
+those configured, `publishAllPublicationsToMavenCentralRepository` signs and uploads.
 
 ## v1.0 known deviations from the spec
 
