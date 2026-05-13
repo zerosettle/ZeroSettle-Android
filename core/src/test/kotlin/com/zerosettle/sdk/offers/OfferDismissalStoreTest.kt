@@ -29,4 +29,21 @@ class OfferDismissalStoreTest {
         assertThat(store.isDismissed("u1")).isFalse()
         assertThat(store.isDismissed("u2")).isFalse()
     }
+
+    @Test fun undismiss_clearsTheDismissedFlagForASingleUser() = runTest {
+        store.resetAll()
+        store.dismiss("alice")
+        assertThat(store.isDismissed("alice")).isTrue()
+        store.undismiss("alice")
+        assertThat(store.isDismissed("alice")).isFalse()
+    }
+
+    @Test fun undismiss_doesNotAffectOtherUsersDismissals() = runTest {
+        store.resetAll()
+        store.dismiss("alice")
+        store.dismiss("bob")
+        store.undismiss("alice")
+        assertThat(store.isDismissed("alice")).isFalse()
+        assertThat(store.isDismissed("bob")).isTrue()
+    }
 }

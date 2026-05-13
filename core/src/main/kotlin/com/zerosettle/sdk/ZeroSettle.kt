@@ -654,6 +654,51 @@ public object ZeroSettle {
         )
     }
 
+    // ─── Static dismissal helpers ──────────────────────────────────────────
+    //
+    // Used by the Flutter plugin's `zerosettle/offer_manager_static` channel;
+    // mirror iOS `ZSOfferManager`'s class-level dismissal API. Userid-keyed so
+    // a single device serving multiple users keeps each user's dismissal
+    // independent (matching iOS).
+
+    /**
+     * Whether [userId] has previously dismissed an offer permanently. Resets
+     * via [resetOfferDismissedState] (clears all users) or
+     * [setOfferDismissed]`(userId, false)` (per-user).
+     *
+     * Throws [ZeroSettleError.NotConfigured] if [configure] hasn't run.
+     */
+    public suspend fun isOfferPermanentlyDismissed(userId: String): Boolean {
+        val store = offerDismissalStore ?: throw ZeroSettleError.NotConfigured
+        return store.isDismissed(userId)
+    }
+
+    /**
+     * Set the dismissal preference for [userId]. `dismissed=true` marks the
+     * offer permanently dismissed for that user; `dismissed=false` clears it.
+     * Mirrors the Dart-side `setDismissed` contract at
+     * `lib/managers/offer_manager.dart:183` which sends both args.
+     *
+     * Throws [ZeroSettleError.NotConfigured] if [configure] hasn't run.
+     */
+    public suspend fun setOfferDismissed(userId: String, dismissed: Boolean) {
+        val store = offerDismissalStore ?: throw ZeroSettleError.NotConfigured
+        if (dismissed) store.dismiss(userId) else store.undismiss(userId)
+    }
+
+    /**
+     * Reset all per-user dismissal state. No-arg (matches iOS handler at
+     * `ZeroSettlePlugin.swift:251-253` and Dart's
+     * `ZSOfferManagerStatics.resetDismissedState()` at
+     * `lib/managers/offer_manager.dart:191`). Typically debug-only.
+     *
+     * Throws [ZeroSettleError.NotConfigured] if [configure] hasn't run.
+     */
+    public suspend fun resetOfferDismissedState() {
+        val store = offerDismissalStore ?: throw ZeroSettleError.NotConfigured
+        store.resetAll()
+    }
+
     public suspend fun fetchUserOffer(): Result<com.zerosettle.sdk.models.UserOffer.Response> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).fetchUserOffer(uid)

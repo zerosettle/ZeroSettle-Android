@@ -22,6 +22,15 @@ public class OfferDismissalStore(private val context: Context) {
         context.offerDismissalsDataStore.edit { it[key(userId)] = true }
     }
 
+    /**
+     * Clear the dismissal preference for a single user. Pairs with [dismiss] —
+     * adopters who need a per-user "un-dismiss" call this rather than the
+     * coarse [resetAll] (which clears every user's dismissal).
+     */
+    public suspend fun undismiss(userId: String) {
+        context.offerDismissalsDataStore.edit { it.remove(key(userId)) }
+    }
+
     /** Clear all dismissal flags (testing / debug). */
     public suspend fun resetAll() {
         context.offerDismissalsDataStore.edit { it.clear() }
