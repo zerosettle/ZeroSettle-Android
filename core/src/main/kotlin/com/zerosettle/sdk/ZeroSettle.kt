@@ -126,6 +126,12 @@ public object ZeroSettle {
             },
             onPendingClaim = { pc -> _pendingClaims.value = _pendingClaims.value + pc },
             emitEvent = { e -> _events.tryEmit(e) },
+            // Deferred-bridge: resolve any in-flight purchaseViaPlayBilling() caller
+            // when the listener-driven sync confirms or fails. `?.complete` /
+            // `?.completeExceptionally` are no-ops when the slot is null — that's
+            // the redelivery-on-relaunch path (no awaiter armed for this purchase).
+            onPurchaseSynced = { txnId -> pendingPlayPurchaseDeferred?.complete(txnId) },
+            onPurchaseFailed = { err -> pendingPlayPurchaseDeferred?.completeExceptionally(err) },
         )
     }
 
@@ -354,6 +360,27 @@ public object ZeroSettle {
     @Volatile private var pendingCheckoutDeferred: CompletableDeferred<String>? = null
 
     /**
+     * Tracks an in-flight Play Billing purchase. Resolves with the backend's
+     * `transactionId` when [com.zerosettle.sdk.billing.PurchaseSyncProcessor]
+     * confirms the purchase, or completes exceptionally with a [ZeroSettleError]
+     * for the failure branches (sync 5xx, ownership conflict, not_owned, pending).
+     *
+     * Lives on the SDK singleton (same lifecycle as [pendingCheckoutDeferred]) so
+     * the listener-driven Play flow — which runs on the coordinator's
+     * scope — can bridge back to the suspending [purchaseViaPlayBilling] caller
+     * even across Activity recreations within a single SDK session.
+     *
+     * One in-flight purchase at a time — concurrent calls fail fast with
+     * [ZeroSettleError.CheckoutInFlight].
+     *
+     * Redelivery semantics: when Play redelivers an unacknowledged purchase from
+     * a prior session, this slot is `null` (the caller is gone). Resolving via
+     * `?.complete(...)` makes that path a no-op; the existing sync + events
+     * stream behaviour is unchanged.
+     */
+    @Volatile private var pendingPlayPurchaseDeferred: CompletableDeferred<String>? = null
+
+    /**
      * High-level, awaitable web checkout. Drives the full flow:
      *
      *  1. Creates a Stripe Checkout session for [productId].
@@ -490,18 +517,91 @@ public object ZeroSettle {
     // ─── Native Play Billing ───────────────────────────────────────────────
 
     /**
-     * Native Play Billing purchase for [productId]. Originates via `BillingClient`,
-     * forwards the resulting purchase to `POST /v1/iap/play-store-transactions/`, and
-     * acknowledges only after the backend confirms (3-day-window rule — see
-     * [com.zerosettle.sdk.billing.PurchaseSyncProcessor]). Mirrors iOS `purchaseViaStoreKit()`.
+     * High-level, awaitable Play Billing purchase. Drives the full flow:
+     *
+     *  1. Launches the Play Billing dialog for [productId] via `BillingClient`.
+     *  2. Suspends until the listener-driven sync path
+     *     ([com.zerosettle.sdk.billing.PurchaseSyncProcessor]) resolves the
+     *     in-flight bridge — backend confirms `owned=true` and the SDK acks the
+     *     purchase (3-day-window rule — see processor docs).
+     *  3. Refetches the hydrated transaction record from the backend.
+     *
+     * Mirrors iOS `purchaseViaStoreKit()`. Like [purchase], the intermediate
+     * `transactionId` is an implementation detail — callers receive a fully
+     * hydrated [CheckoutTransaction][com.zerosettle.sdk.models.CheckoutTransaction].
+     *
+     * Concurrent calls fail with [ZeroSettleError.CheckoutInFlight] — the SDK
+     * serializes one Play purchase at a time (same variant as web checkout).
+     *
+     * Failure modes:
+     *  - Dialog-launch failure (product not found, billing client not connected,
+     *    user cancelled) returns immediately without suspending — no listener
+     *    fire is coming so awaiting would hang.
+     *  - Sync 5xx / ownership conflict / `not_owned` / `PENDING` purchase state
+     *    resolve the bridge exceptionally; the caller observes a [Result.failure].
+     *
+     * Redelivery: when Play redelivers an unacknowledged purchase on next app
+     * launch, no caller is awaiting; the bridge no-ops gracefully and the
+     * normal sync + events-stream behaviour proceeds unchanged.
+     *
+     * If the awaiting coroutine is cancelled before the sync resolves
+     * (e.g., host scope torn down), the [kotlinx.coroutines.CancellationException]
+     * propagates per Kotlin convention; the in-flight slot is cleared so a
+     * subsequent call isn't blocked.
      *
      * Requires `ZeroSettleConfig.syncPlayPurchases = true`.
      */
-    public suspend fun purchaseViaPlayBilling(activity: android.app.Activity, productId: String): Result<Unit> {
+    public suspend fun purchaseViaPlayBilling(
+        activity: android.app.Activity,
+        productId: String,
+    ): Result<com.zerosettle.sdk.models.CheckoutTransaction> {
         if (currentUserIdOrNull() == null) return Result.failure(ZeroSettleError.UserNotIdentified)
         val coord = playCoordinator ?: return Result.failure(ZeroSettleError.NotConfigured)
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
         val product = product(productId) ?: return Result.failure(ZeroSettleError.ProductNotFound(productId))
-        return coord.purchaseViaPlayBilling(activity, product)
+
+        // Arm the bridge BEFORE launching the dialog so the listener fire (which
+        // may arrive very quickly on a fast device) finds a deferred to resolve.
+        // synchronized() ensures two parallel callers can't both pass the
+        // concurrent-call guard and clobber each other's deferred — same pattern
+        // as A2's purchase() web-checkout flow.
+        val deferred: CompletableDeferred<String> = synchronized(this) {
+            if (pendingPlayPurchaseDeferred != null) return Result.failure(ZeroSettleError.CheckoutInFlight)
+            CompletableDeferred<String>().also { pendingPlayPurchaseDeferred = it }
+        }
+
+        // Launch the Play dialog. If THIS fails (product details query failed,
+        // billing client refused to launch, user immediately cancelled), no
+        // listener fire is coming — clear the slot and return BEFORE the
+        // suspend point so the caller isn't left hanging on a deferred that
+        // will never resolve.
+        val launchResult = coord.purchaseViaPlayBilling(activity, product)
+        if (launchResult.isFailure) {
+            pendingPlayPurchaseDeferred = null
+            return Result.failure(launchResult.exceptionOrNull() ?: ZeroSettleError.CheckoutFailed("launch_failed"))
+        }
+
+        // try/finally clears the slot on every exit path (success, throw, cancel).
+        // Matches A2's discipline — without it, an unexpected exception inside
+        // fetchTransaction would leak the slot and lock out future calls.
+        try {
+            val transactionId: String = try {
+                deferred.await()
+            } catch (e: ZeroSettleError) {
+                // Bridge was completed exceptionally from the sync processor —
+                // surface as Result.failure rather than propagating.
+                return Result.failure(e)
+            }
+            // CancellationException intentionally propagates per Kotlin coroutine
+            // convention — the `finally` below still runs and resets state.
+
+            if (transactionId.isEmpty()) {
+                return Result.failure(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
+            }
+            return be.fetchTransaction(transactionId)
+        } finally {
+            pendingPlayPurchaseDeferred = null
+        }
     }
 
     // ─── Unified offers ────────────────────────────────────────────────────
@@ -683,6 +783,8 @@ public object ZeroSettle {
         _pendingCheckout.value = false
         pendingCheckoutDeferred?.cancel()
         pendingCheckoutDeferred = null
+        pendingPlayPurchaseDeferred?.cancel()
+        pendingPlayPurchaseDeferred = null
         entitlementPoller?.stop()
         entitlementPoller = null
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }

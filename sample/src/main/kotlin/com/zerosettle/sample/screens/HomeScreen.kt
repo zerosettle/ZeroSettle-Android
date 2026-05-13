@@ -102,7 +102,7 @@ fun HomeScreen() {
                             OutlinedButton(onClick = {
                                 scope.launch {
                                     val r = ZeroSettle.purchaseViaPlayBilling(activity, p.id)
-                                    lastAction = if (r.isSuccess) "Play purchase flow launched" else "Play purchase failed: ${r.exceptionOrNull()?.message}"
+                                    lastAction = if (r.isSuccess) "Play purchase completed: txn=${r.getOrNull()?.id}" else "Play purchase failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }) { Text("Buy — Google Play") }
                         }

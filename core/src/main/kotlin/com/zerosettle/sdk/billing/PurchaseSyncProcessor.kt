@@ -31,6 +31,21 @@ internal class PurchaseSyncProcessor(
     private val acknowledge: suspend (purchaseToken: String) -> Result<Unit>,
     private val emitEvent: (ZeroSettleEvent) -> Unit,
     private val onConflictClaim: (PendingClaim) -> Unit = {},
+    // ─── Deferred-bridge callbacks (Task A3) ─────────────────────────────────
+    //
+    // Fired ONLY from the listener-driven [process] call — never from
+    // [retryQueued]. A retry drains rows from prior sessions whose original
+    // awaiter is gone; resolving the *current* awaiter's deferred with one of
+    // those transactionIds would deliver the wrong purchase to the caller.
+    //
+    // Ordering contract: [onPurchaseSynced] fires BEFORE the
+    // [ZeroSettleEvent.PurchaseSucceeded] event emit so direct
+    // `purchaseViaPlayBilling()` callers resume before events-stream observers
+    // see the event — consistent observable sequence.
+    //
+    // Both default to no-ops so existing callers (and tests) keep working.
+    private val onPurchaseSynced: (transactionId: String) -> Unit = {},
+    private val onPurchaseFailed: (error: ZeroSettleError) -> Unit = {},
     private val strictAck: Boolean = false,
     private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
@@ -41,7 +56,13 @@ internal class PurchaseSyncProcessor(
 
     /** Sync one freshly-observed purchase. */
     public suspend fun process(d: PurchaseDescriptor): Result<Unit> {
-        if (d.purchaseState == 2 /* PENDING */) return Result.failure(ZeroSettleError.PurchasePending)
+        if (d.purchaseState == 2 /* PENDING */) {
+            // Resolve the awaiter so a parental-approval / pending purchase
+            // doesn't hang `purchaseViaPlayBilling()` forever waiting on a
+            // listener fire that won't come until Google decides.
+            onPurchaseFailed(ZeroSettleError.PurchasePending)
+            return Result.failure(ZeroSettleError.PurchasePending)
+        }
 
         val syncRes = backend.syncPlayPurchase(
             userId = d.userId, purchaseToken = d.purchaseToken, productId = d.productId,
@@ -58,6 +79,8 @@ internal class PurchaseSyncProcessor(
                 ),
             )
             queue.recordFailure(d.purchaseToken, nowMillis())
+            val wrapped = err as? ZeroSettleError ?: ZeroSettleError.NetworkError(err)
+            onPurchaseFailed(wrapped)
             return Result.failure(err)
         }
 
@@ -65,7 +88,16 @@ internal class PurchaseSyncProcessor(
             resp.owned -> {
                 if (!d.isAcknowledged) acknowledge(d.purchaseToken)
                 queue.remove(d.purchaseToken)
-                emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = d.productId, transactionId = resp.transactionId ?: ""))
+                val txnId = resp.transactionId ?: ""
+                // Resolve the awaiter BEFORE emitting PurchaseSucceeded so direct
+                // callers of purchaseViaPlayBilling() complete first and observers
+                // of the events stream see a consistent ordering.
+                if (txnId.isNotEmpty()) {
+                    onPurchaseSynced(txnId)
+                } else {
+                    onPurchaseFailed(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
+                }
+                emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = d.productId, transactionId = txnId))
                 Result.success(Unit)
             }
             resp.conflict && resp.claimAvailable -> {
@@ -76,10 +108,12 @@ internal class PurchaseSyncProcessor(
                         existingOwnerHint = resp.existingOwnerHint ?: "another account",
                     ),
                 )
+                onPurchaseFailed(ZeroSettleError.CheckoutFailed("ownership_conflict"))
                 Result.failure(ZeroSettleError.CheckoutFailed("ownership_conflict"))
             }
             else -> {
                 emitEvent(ZeroSettleEvent.PurchaseFailed(productId = d.productId, reason = "not_owned"))
+                onPurchaseFailed(ZeroSettleError.CheckoutFailed("not_owned"))
                 Result.failure(ZeroSettleError.CheckoutFailed("not_owned"))
             }
         }

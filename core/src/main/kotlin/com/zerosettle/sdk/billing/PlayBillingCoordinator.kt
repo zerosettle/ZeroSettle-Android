@@ -42,6 +42,12 @@ internal class PlayBillingCoordinator(
     private val onEntitlementsMayHaveChanged: () -> Unit,
     private val onPendingClaim: (PendingClaim) -> Unit,
     private val emitEvent: (ZeroSettleEvent) -> Unit,
+    // Deferred-bridge hooks for [com.zerosettle.sdk.ZeroSettle.purchaseViaPlayBilling]:
+    // resolve / fail the awaiting deferred from inside the listener-driven sync.
+    // Defaults are no-ops so non-bridging callers (tests, future entry points)
+    // keep working unchanged.
+    private val onPurchaseSynced: (transactionId: String) -> Unit = {},
+    private val onPurchaseFailed: (error: ZeroSettleError) -> Unit = {},
 ) {
     val queue: PlaySyncQueue = PlaySyncQueue(context.applicationContext)
 
@@ -55,7 +61,9 @@ internal class PlayBillingCoordinator(
     private val processor = PurchaseSyncProcessor(
         backend = backend, queue = queue,
         acknowledge = { token -> billing.acknowledge(token) },
-        emitEvent = emitEvent, onConflictClaim = onPendingClaim, strictAck = strictAck,
+        emitEvent = emitEvent, onConflictClaim = onPendingClaim,
+        onPurchaseSynced = onPurchaseSynced, onPurchaseFailed = onPurchaseFailed,
+        strictAck = strictAck,
     )
 
     private val reconciler = SubscriptionReconciler(backend)
