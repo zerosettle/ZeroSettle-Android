@@ -96,7 +96,7 @@ fun HomeScreen() {
                             Button(onClick = {
                                 scope.launch {
                                     val r = ZeroSettle.purchase(activity, p.id)
-                                    lastAction = if (r.isSuccess) "web checkout opened: ${r.getOrNull()}" else "web purchase failed: ${r.exceptionOrNull()?.message}"
+                                    lastAction = if (r.isSuccess) "web checkout completed: txn=${r.getOrNull()?.id}" else "web purchase failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }) { Text("Buy — Web") }
                             OutlinedButton(onClick = {

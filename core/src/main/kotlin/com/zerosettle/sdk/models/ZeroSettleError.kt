@@ -30,6 +30,16 @@ public sealed class ZeroSettleError : Exception() {
         private fun readResolve(): Any = PurchaseCancelled
         override val message: String = "Purchase cancelled by user."
     }
+    /**
+     * The caller invoked `purchase()` while a previous `purchase()` call was
+     * still awaiting its deep-link return. The high-level API serializes one
+     * checkout at a time — fail-fast rather than queue. The first call will
+     * still resolve normally when its callback arrives.
+     */
+    public data object CheckoutInFlight : ZeroSettleError() {
+        private fun readResolve(): Any = CheckoutInFlight
+        override val message: String = "A web checkout is already in progress."
+    }
     public data object PurchasePending : ZeroSettleError() {
         private fun readResolve(): Any = PurchasePending
         override val message: String = "Purchase is pending Google's review (parental approval, etc)."

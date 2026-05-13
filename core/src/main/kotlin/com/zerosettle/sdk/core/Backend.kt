@@ -234,6 +234,16 @@ internal class Backend(
         http.get("/v1/iap/transaction-history/?user_id=${enc(userId)}")
 
     /**
+     * `GET /v1/iap/transactions/<transactionId>/` — hydrated single-transaction record.
+     * Used by [ZeroSettle.purchase] after the web-checkout deep-link returns so the
+     * caller gets a [CheckoutTransaction] (not just an opaque id). Returns a
+     * `404`→[ZeroSettleError.BackendError] if the id is unknown to the backend.
+     */
+    suspend fun fetchTransaction(transactionId: String): Result<com.zerosettle.sdk.models.CheckoutTransaction> =
+        http.get("/v1/iap/transactions/${enc(transactionId)}/")
+            .mapDecode(com.zerosettle.sdk.models.CheckoutTransaction.serializer())
+
+    /**
      * `POST /v1/iap/play-store-transactions/` — syncs a Play Billing purchase to the
      * backend (creates a Transaction + entitlement, or surfaces a cross-account
      * conflict).

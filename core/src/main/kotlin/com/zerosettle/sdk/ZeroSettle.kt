@@ -12,6 +12,8 @@ import com.zerosettle.sdk.models.PendingClaim
 import com.zerosettle.sdk.models.Product
 import com.zerosettle.sdk.models.ProductCatalog
 import com.zerosettle.sdk.models.ZeroSettleError
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -340,36 +342,103 @@ public object ZeroSettle {
     // ─── Web checkout (Stripe) ─────────────────────────────────────────────
 
     /**
-     * Open the Stripe web checkout for [productId]. Returns the `checkout_url` on
-     * success (the SDK launches it in a Custom Tab and also returns it for callers
-     * who want their own presentation). Sets [pendingCheckout] = true; cleared by
-     * [completeWebCheckout] when the checkout page redirects back.
-     *
-     * Mirrors iOS `ZeroSettle.shared.purchase(_:)` — web checkout, NOT native Play.
+     * Tracks an in-flight web checkout. The Deferred resolves with the
+     * transactionId when [completeWebCheckout] is called, or completes
+     * exceptionally with a [ZeroSettleError] when the callback signals
+     * cancel / failure. Lives on the SDK singleton so it survives Activity
+     * recreations (Custom Tab → deep-link return → caller observes via the
+     * same suspending [purchase] call). One in-flight checkout at a time —
+     * concurrent [purchase] calls fail fast with [ZeroSettleError.CheckoutInFlight].
      */
-    public suspend fun purchase(activity: android.app.Activity, productId: String): Result<String> {
+    @Volatile private var pendingCheckoutDeferred: CompletableDeferred<String>? = null
+
+    /**
+     * High-level, awaitable web checkout. Drives the full flow:
+     *
+     *  1. Creates a Stripe Checkout session for [productId].
+     *  2. Launches it in a Chrome Custom Tab (or external browser when the
+     *     backend asks for [com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER]).
+     *  3. Suspends until the host app feeds the `zerosettle://checkout/return…`
+     *     deep link back via [completeWebCheckout].
+     *  4. Refetches the hydrated transaction record from the backend.
+     *
+     * Mirrors iOS `ZeroSettle.shared.purchase(_:)`. The intermediate URL is an
+     * implementation detail — callers who want custom WebView presentation
+     * should use [OfferManager.checkoutUrl] instead (the explicit escape hatch).
+     *
+     * Concurrent calls fail with [ZeroSettleError.CheckoutInFlight] — the SDK
+     * serializes one checkout at a time.
+     *
+     * If the awaiting coroutine is cancelled before the deep-link return
+     * (e.g., the host scope is torn down), the [CancellationException]
+     * propagates per Kotlin coroutine conventions; the in-flight bridge slot
+     * is cleared so a subsequent [purchase] call isn't blocked. The SDK's
+     * deep-link side effects (entitlement refresh, event emission) still fire
+     * normally when the callback eventually arrives.
+     */
+    public suspend fun purchase(
+        activity: android.app.Activity,
+        productId: String,
+    ): Result<com.zerosettle.sdk.models.CheckoutTransaction> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
-        return be.createWebCheckout(
+
+        // Arm the bridge BEFORE any suspension so two parallel callers can't both
+        // pass the concurrent-call guard and clobber each other's deferred. The
+        // assignment + null-check are both on the JVM main reference, and pairs
+        // of Activity-launched coroutines on different dispatchers can interleave
+        // around any `withContext(IO)` inside createWebCheckout otherwise.
+        val deferred: CompletableDeferred<String> = synchronized(this) {
+            if (pendingCheckoutDeferred != null) return Result.failure(ZeroSettleError.CheckoutInFlight)
+            CompletableDeferred<String>().also { pendingCheckoutDeferred = it }
+        }
+
+        val createResult = be.createWebCheckout(
             userId = uid, productId = productId, playPurchaseToken = null,
             customerName = customerName, customerEmail = customerEmail,
-        ).map { resp ->
-            _pendingCheckout.value = true
-            when (resp.checkoutPresentation) {
-                com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER ->
-                    com.zerosettle.sdk.checkout.WebCheckoutFlow.launchExternalBrowser(activity, resp.checkoutUrl)
-                else ->
-                    com.zerosettle.sdk.checkout.WebCheckoutFlow.launchCustomTab(activity, resp.checkoutUrl)
-            }
-            resp.checkoutUrl
+        )
+        val resp = createResult.getOrElse {
+            // Network/decoding error before we ever launched the tab — release
+            // the slot so the next purchase() call isn't blocked.
+            pendingCheckoutDeferred = null
+            return Result.failure(it)
         }
+
+        _pendingCheckout.value = true
+        when (resp.checkoutPresentation) {
+            com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER ->
+                com.zerosettle.sdk.checkout.WebCheckoutFlow.launchExternalBrowser(activity, resp.checkoutUrl)
+            else ->
+                com.zerosettle.sdk.checkout.WebCheckoutFlow.launchCustomTab(activity, resp.checkoutUrl)
+        }
+
+        val transactionId: String = try {
+            deferred.await()
+        } catch (e: CancellationException) {
+            // Awaiter cancelled — but `completeWebCheckout` may still arrive and
+            // refresh entitlements. Clear the slot so a subsequent purchase()
+            // isn't permanently locked out.
+            pendingCheckoutDeferred = null
+            throw e
+        } catch (e: ZeroSettleError) {
+            pendingCheckoutDeferred = null
+            return Result.failure(e)
+        }
+        pendingCheckoutDeferred = null
+
+        return be.fetchTransaction(transactionId)
     }
 
     /**
      * Feed the `zerosettle://checkout/return…` deep link back into the SDK. The host
      * app calls this from the Activity that received the redirect intent. Clears
-     * [pendingCheckout]; on success, refreshes entitlements and emits a
-     * [ZeroSettleEvent.PurchaseSucceeded].
+     * [pendingCheckout]; on success, refreshes entitlements, emits a
+     * [ZeroSettleEvent.PurchaseSucceeded], and resolves any in-flight [purchase]
+     * call with the transactionId so it can refetch the hydrated record.
+     *
+     * Side effects (entitlement refresh, event emission, pendingCheckout reset)
+     * fire whether or not a [purchase] call is currently awaiting — the deep link
+     * is the source of truth for what just happened in the browser.
      */
     public suspend fun completeWebCheckout(callbackUrl: String): Result<Unit> {
         val parsed = com.zerosettle.sdk.checkout.WebCheckoutFlow.parseCallback(callbackUrl)
@@ -377,14 +446,30 @@ public object ZeroSettle {
         _pendingCheckout.value = false
         return when (parsed) {
             is com.zerosettle.sdk.checkout.WebCheckoutFlow.CallbackResult.Succeeded -> {
+                val txnId = parsed.transactionId ?: ""
+                // Resolve the in-flight purchase() awaiter FIRST and unconditionally —
+                // the checkout page already redirected with `status=success`, so the
+                // user-visible purchase succeeded even if a subsequent entitlement
+                // refresh fails (network blip). Gating the resolve on restoreEntitlements
+                // would leave the awaiter hanging on transient failures.
+                if (txnId.isNotEmpty()) {
+                    pendingCheckoutDeferred?.complete(txnId)
+                } else {
+                    pendingCheckoutDeferred?.completeExceptionally(
+                        ZeroSettleError.CheckoutFailed("missing_transaction_id"),
+                    )
+                }
                 restoreEntitlements().map {
-                    _events.tryEmit(ZeroSettleEvent.PurchaseSucceeded(productId = "", transactionId = parsed.transactionId ?: ""))
+                    _events.tryEmit(ZeroSettleEvent.PurchaseSucceeded(productId = "", transactionId = txnId))
                 }
             }
-            com.zerosettle.sdk.checkout.WebCheckoutFlow.CallbackResult.Cancelled ->
+            com.zerosettle.sdk.checkout.WebCheckoutFlow.CallbackResult.Cancelled -> {
+                pendingCheckoutDeferred?.completeExceptionally(ZeroSettleError.PurchaseCancelled)
                 Result.failure(ZeroSettleError.PurchaseCancelled)
+            }
             is com.zerosettle.sdk.checkout.WebCheckoutFlow.CallbackResult.Failed -> {
                 _events.tryEmit(ZeroSettleEvent.PurchaseFailed(productId = "", reason = parsed.reason))
+                pendingCheckoutDeferred?.completeExceptionally(ZeroSettleError.CheckoutFailed(parsed.reason))
                 Result.failure(ZeroSettleError.CheckoutFailed(parsed.reason))
             }
         }
@@ -584,6 +669,8 @@ public object ZeroSettle {
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
         _pendingCheckout.value = false
+        pendingCheckoutDeferred?.cancel()
+        pendingCheckoutDeferred = null
         entitlementPoller?.stop()
         entitlementPoller = null
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }

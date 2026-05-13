@@ -12,6 +12,7 @@ class ZeroSettleErrorTest {
             ZeroSettleError.InvalidUserId("blank"),
             ZeroSettleError.CheckoutFailed("user_cancelled"),
             ZeroSettleError.PurchaseCancelled,
+            ZeroSettleError.CheckoutInFlight,
             ZeroSettleError.PurchasePending,
             ZeroSettleError.PlayBillingError(responseCode = 6, debugMessage = "x"),
             ZeroSettleError.BackendError(statusCode = 500, body = "err"),
@@ -33,6 +34,7 @@ class ZeroSettleErrorTest {
                 is ZeroSettleError.InvalidUserId -> "iui"
                 is ZeroSettleError.CheckoutFailed -> "cf"
                 is ZeroSettleError.PurchaseCancelled -> "pc"
+                is ZeroSettleError.CheckoutInFlight -> "cif"
                 is ZeroSettleError.PurchasePending -> "pp"
                 is ZeroSettleError.PlayBillingError -> "pbe"
                 is ZeroSettleError.BackendError -> "be"
