@@ -346,9 +346,10 @@ public object ZeroSettle {
      * transactionId when [completeWebCheckout] is called, or completes
      * exceptionally with a [ZeroSettleError] when the callback signals
      * cancel / failure. Lives on the SDK singleton so it survives Activity
-     * recreations (Custom Tab → deep-link return → caller observes via the
-     * same suspending [purchase] call). One in-flight checkout at a time —
-     * concurrent [purchase] calls fail fast with [ZeroSettleError.CheckoutInFlight].
+     * recreations within a single SDK session (Custom Tab → deep-link
+     * return → caller observes via the same suspending [purchase] call).
+     * One in-flight checkout at a time — concurrent [purchase] calls fail
+     * fast with [ZeroSettleError.CheckoutInFlight].
      */
     @Volatile private var pendingCheckoutDeferred: CompletableDeferred<String>? = null
 
@@ -399,34 +400,45 @@ public object ZeroSettle {
         )
         val resp = createResult.getOrElse {
             // Network/decoding error before we ever launched the tab — release
-            // the slot so the next purchase() call isn't blocked.
+            // the slot so the next purchase() call isn't blocked. _pendingCheckout
+            // was never set true on this path so it doesn't need resetting.
             pendingCheckoutDeferred = null
             return Result.failure(it)
         }
 
+        // Everything past this point — Custom Tab launch, await, fetchTransaction —
+        // runs inside a single try/finally that clears BOTH the bridge slot AND
+        // the public _pendingCheckout flag on every exit path. The launch calls
+        // can throw (ActivityNotFoundException, SecurityException, etc.); without
+        // the finally, the slot would leak and subsequent purchase() calls would
+        // be permanently locked out with CheckoutInFlight. The flag reset also
+        // covers cancellation and ZeroSettleError-from-await paths so public
+        // StateFlow consumers don't see a stale `true` after a cancelled checkout.
         _pendingCheckout.value = true
-        when (resp.checkoutPresentation) {
-            com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER ->
-                com.zerosettle.sdk.checkout.WebCheckoutFlow.launchExternalBrowser(activity, resp.checkoutUrl)
-            else ->
-                com.zerosettle.sdk.checkout.WebCheckoutFlow.launchCustomTab(activity, resp.checkoutUrl)
-        }
+        try {
+            when (resp.checkoutPresentation) {
+                com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER ->
+                    com.zerosettle.sdk.checkout.WebCheckoutFlow.launchExternalBrowser(activity, resp.checkoutUrl)
+                else ->
+                    com.zerosettle.sdk.checkout.WebCheckoutFlow.launchCustomTab(activity, resp.checkoutUrl)
+            }
 
-        val transactionId: String = try {
-            deferred.await()
-        } catch (e: CancellationException) {
-            // Awaiter cancelled — but `completeWebCheckout` may still arrive and
-            // refresh entitlements. Clear the slot so a subsequent purchase()
-            // isn't permanently locked out.
-            pendingCheckoutDeferred = null
-            throw e
-        } catch (e: ZeroSettleError) {
-            pendingCheckoutDeferred = null
-            return Result.failure(e)
-        }
-        pendingCheckoutDeferred = null
+            val transactionId: String = try {
+                deferred.await()
+            } catch (e: ZeroSettleError) {
+                // The deferred was completed exceptionally by completeWebCheckout
+                // (cancel / failed-status). Surface as Result.failure rather than
+                // propagating — that's the contract for "normal" purchase errors.
+                return Result.failure(e)
+            }
+            // CancellationException intentionally propagates per Kotlin coroutine
+            // convention — the `finally` block below still runs and resets state.
 
-        return be.fetchTransaction(transactionId)
+            return be.fetchTransaction(transactionId)
+        } finally {
+            pendingCheckoutDeferred = null
+            _pendingCheckout.value = false
+        }
     }
 
     /**

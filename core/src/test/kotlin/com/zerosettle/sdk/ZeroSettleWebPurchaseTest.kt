@@ -1,10 +1,13 @@
 package com.zerosettle.sdk
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.zerosettle.sdk.models.ZeroSettleError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -183,5 +186,98 @@ class ZeroSettleWebPurchaseTest {
         // Cleanly resolve the first to avoid leaking state across tests.
         ZeroSettle.completeWebCheckout("zerosettle://checkout/return?status=success&transaction_id=txn_1")
         withTimeout(5000) { first.await() }
+    }
+
+    /**
+     * An Activity subclass whose `startActivity` always throws — used to simulate
+     * the I1 launch-failure path (e.g. host with no browser installed firing the
+     * BROWSER presentation, or a CustomTabsIntent rejection).
+     */
+    private class ThrowingStartActivity : android.app.Activity() {
+        override fun startActivity(intent: Intent?) {
+            throw ActivityNotFoundException("no activity handles this intent (test stub)")
+        }
+        override fun startActivity(intent: Intent?, options: android.os.Bundle?) {
+            throw ActivityNotFoundException("no activity handles this intent (test stub)")
+        }
+    }
+
+    /**
+     * Regression for I1: if launching the Custom Tab / external browser throws,
+     * the bridge slot + `_pendingCheckout` flag must be reset. Previously the
+     * slot leaked and subsequent `purchase()` calls were permanently locked out
+     * with `CheckoutInFlight`.
+     *
+     * Uses `BROWSER` presentation → `activity.startActivity(Intent.ACTION_VIEW)`,
+     * which our stub Activity makes throw.
+     */
+    @Test fun purchase_clears_slot_when_browser_launch_throws() = runBlocking<Unit> {
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            // Backend asks for BROWSER presentation → routes through launchExternalBrowser
+            // which calls activity.startActivity — our throwing stub triggers the leak path.
+            "/v1/iap/checkout-configs/" to { MockResponse().setBody(
+                """{"checkout_url":"https://c/x","checkout_presentation":"browser"}""",
+            ) },
+            "/v1/iap/transactions/" to { MockResponse().setBody(
+                """{"id":"txn_x","product_id":"pro_monthly","status":"completed","source":"web_checkout","purchased_at":"2026-05-11T00:00:00Z"}""",
+            ) },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        val throwingActivity = Robolectric.buildActivity(ThrowingStartActivity::class.java).setup().get()
+        val raised: Throwable = try {
+            ZeroSettle.purchase(throwingActivity, productId = "pro_monthly")
+            error("expected purchase() to propagate ActivityNotFoundException")
+        } catch (e: ActivityNotFoundException) {
+            e
+        }
+        assertThat(raised).isInstanceOf(ActivityNotFoundException::class.java)
+        // I2: the public flag must NOT be stuck at `true` after the launch throw.
+        assertThat(ZeroSettle.pendingCheckout.value).isFalse()
+
+        // I1: subsequent purchase() must NOT fail with CheckoutInFlight — the slot
+        // was cleared by the finally block. We don't care about the eventual outcome
+        // here (we'll cancel it), only that the guard passes.
+        val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val second = scope.async { ZeroSettle.purchase(activity, productId = "pro_monthly") }
+        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        // If we got here, the second call passed the CheckoutInFlight guard and
+        // armed a fresh deferred. Cleanly tear it down.
+        second.cancel()
+    }
+
+    /**
+     * Regression for I2: when the awaiter is cancelled mid-checkout (host scope
+     * torn down before the deep-link return arrives), `_pendingCheckout.value`
+     * must flip back to `false`. Previously it stayed at `true` — public
+     * StateFlow consumers would see a stale "checkout in progress" forever.
+     */
+    @Test fun cancellation_mid_checkout_resets_pendingCheckout_flag() = runBlocking<Unit> {
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            "/v1/iap/checkout-configs/" to { MockResponse().setBody("""{"checkout_url":"https://c/x"}""") },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val job: Job = scope.async { ZeroSettle.purchase(activity, productId = "pro_monthly") }
+        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        assertThat(ZeroSettle.pendingCheckout.value).isTrue()
+
+        // Cancel the awaiter mid-flight — the deep-link return never arrives.
+        job.cancel()
+        withTimeout(5000) { while (ZeroSettle.pendingCheckout.value) delay(10) }
+        assertThat(ZeroSettle.pendingCheckout.value).isFalse()
+
+        // And the bridge slot must be clear so a fresh purchase() is allowed.
+        val activity2 = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        val second = scope.async { ZeroSettle.purchase(activity2, productId = "pro_monthly") }
+        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        second.cancel()
     }
 }
