@@ -172,6 +172,20 @@ public class OfferManager internal constructor(
     }
 
     /**
+     * Overload accepting an optional `transactionId` for Dart-wire-shape
+     * parity with iOS (which threads the id through `markCheckoutSucceeded`).
+     * The id is currently unused — the SDK's checkout-success path
+     * reconciles against backend state, not a client-supplied id — but the
+     * overload exists so the Flutter plugin can forward the arg without
+     * dropping it; future SDK releases may use the id without requiring a
+     * plugin change.
+     */
+    public suspend fun onWebCheckoutSucceeded(transactionId: String?) {
+        @Suppress("UNUSED_PARAMETER") val ignored = transactionId
+        onWebCheckoutSucceeded()
+    }
+
+    /**
      * Re-check whether the source store subscription's auto-renew has flipped off (the
      * backend cancelled it). If so, transition `ACCEPTED → COMPLETED`. Called by the
      * Play reconcile loop after each refresh, and by [onWebCheckoutSucceeded].
