@@ -814,6 +814,24 @@ public object ZeroSettle {
             }
     }
 
+    /**
+     * Overload for cross-platform callers (Flutter plugin) that have the
+     * transactionId but not the full [PendingAction] sealed-class variant.
+     * Resolves the variant from the active [pendingActions] list and forwards
+     * to the typed overload.
+     *
+     * Returns `Result.failure(ZeroSettleError.NotFound)` if the transactionId
+     * isn't currently in [_pendingActions]. The Flutter plugin maps this to a
+     * `not_found` error code adopters can handle.
+     */
+    public suspend fun dismissPendingAction(transactionId: String): Result<Unit> {
+        val action = _pendingActions.value.firstOrNull { it.transactionId == transactionId }
+            ?: return Result.failure(
+                ZeroSettleError.NotFound("No pending action for transaction $transactionId")
+            )
+        return dismissPendingAction(action)
+    }
+
     // ─── Test surface ───────────────────────────────────────────────────────
 
     /** Test-only: reset all state. */

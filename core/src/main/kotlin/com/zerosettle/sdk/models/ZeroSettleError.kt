@@ -66,6 +66,12 @@ public sealed class ZeroSettleError : Exception() {
     public data class ProductNotFound(val productId: String) : ZeroSettleError() {
         override val message: String get() = "Product not found: $productId"
     }
+    /**
+     * A targeted entity (e.g., pending action by transactionId, offer by id)
+     * was not found in the SDK's local state. Plugin maps this to Flutter
+     * error code `not_found`.
+     */
+    public data class NotFound(override val message: String) : ZeroSettleError()
     public data object NotBootstrapped : ZeroSettleError() {
         private fun readResolve(): Any = NotBootstrapped
         override val message: String = "SDK not yet bootstrapped — call identify(...) first."

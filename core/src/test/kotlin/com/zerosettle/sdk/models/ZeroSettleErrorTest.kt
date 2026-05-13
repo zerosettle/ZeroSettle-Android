@@ -25,6 +25,7 @@ class ZeroSettleErrorTest {
             ZeroSettleError.OfferIneligible,
             ZeroSettleError.MerchantNotOnboarded,
             ZeroSettleError.JurisdictionBlocked("UK"),
+            ZeroSettleError.NotFound("missing"),
         )
         cases.forEach { e ->
             val handled: String = when (e) {
@@ -47,6 +48,7 @@ class ZeroSettleErrorTest {
                 is ZeroSettleError.OfferIneligible -> "oi"
                 is ZeroSettleError.MerchantNotOnboarded -> "mo"
                 is ZeroSettleError.JurisdictionBlocked -> "jb"
+                is ZeroSettleError.NotFound -> "nf"
             }
             assertThat(handled).isNotEmpty()
         }
