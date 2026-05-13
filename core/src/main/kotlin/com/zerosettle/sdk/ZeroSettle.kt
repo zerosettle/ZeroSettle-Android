@@ -83,7 +83,7 @@ public object ZeroSettle {
         )
         this.entitlementPoller = com.zerosettle.sdk.entitlements.EntitlementPoller(
             backend = this.backend!!,
-            userIdProvider = { activeUserId },
+            userIdProvider = { _currentUserId.value },
             onEntitlements = { ents ->
                 _entitlements.value = ents
                 _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = ents.size))
@@ -112,9 +112,9 @@ public object ZeroSettle {
             scope = scope.scope,
             logger = cfg.logger,
             strictAck = cfg.strictAck,
-            userIdProvider = { activeUserId },
+            userIdProvider = { _currentUserId.value },
             obfuscatedAccountIdProvider = {
-                activeUserId?.let { uid -> AppAccountToken.derive(uid, ctx.packageName).toString() }
+                _currentUserId.value?.let { uid -> AppAccountToken.derive(uid, ctx.packageName).toString() }
             },
             customerNameProvider = { customerName },
             customerEmailProvider = { customerEmail },
@@ -132,7 +132,15 @@ public object ZeroSettle {
     private val _isBootstrapped = MutableStateFlow(false)
     public val isBootstrapped: StateFlow<Boolean> = _isBootstrapped.asStateFlow()
 
-    @Volatile private var activeUserId: String? = null
+    private val _currentUserId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    /**
+     * The currently-identified user id, or null if no identity has been set.
+     * Updated by `identify(.user)`, `identify(.anonymous)` (synthetic anon-uuid),
+     * and `logout()`. Exposed publicly so cross-platform bridges (Flutter plugin)
+     * can read the canonical source without reflection or context-aware
+     * accessor patterns.
+     */
+    public val currentUserId: kotlinx.coroutines.flow.StateFlow<String?> = _currentUserId.asStateFlow()
     @Volatile private var customerName: String? = null
     @Volatile private var customerEmail: String? = null
 
@@ -156,7 +164,7 @@ public object ZeroSettle {
 
         return when (identity) {
             is Identity.User -> {
-                activeUserId = identity.id
+                _currentUserId.value = identity.id
                 store.setActiveUserId(identity.id)
                 identity.name?.let { customerName = it }
                 identity.email?.let { customerEmail = it }
@@ -167,7 +175,7 @@ public object ZeroSettle {
             }
             Identity.Anonymous -> {
                 val uuid = store.anonymousUuid()
-                activeUserId = uuid
+                _currentUserId.value = uuid
                 store.setActiveUserId(uuid)
                 bootstrap(uuid)
             }
@@ -207,7 +215,7 @@ public object ZeroSettle {
         entitlementPoller?.stop()
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         scope.reset()
-        activeUserId = null
+        _currentUserId.value = null
         customerName = null
         customerEmail = null
         _isBootstrapped.value = false
@@ -278,8 +286,8 @@ public object ZeroSettle {
     public fun hasActiveEntitlement(productId: String): Boolean =
         _entitlements.value.any { it.productId == productId && it.isActive }
 
-    internal fun requireUserId(): String = activeUserId ?: throw ZeroSettleError.UserNotIdentified
-    internal fun currentUserIdOrNull(): String? = activeUserId
+    internal fun requireUserId(): String = _currentUserId.value ?: throw ZeroSettleError.UserNotIdentified
+    internal fun currentUserIdOrNull(): String? = _currentUserId.value
     internal fun currentCustomerName(): String? = customerName
     internal fun currentCustomerEmail(): String? = customerEmail
 
@@ -585,12 +593,12 @@ public object ZeroSettle {
         config = null
         backend = null
         identityStore = null
-        activeUserId = null
+        _currentUserId.value = null
         customerName = null
         customerEmail = null
     }
 
-    internal fun activeUserIdForTesting(): String? = activeUserId
+    internal fun activeUserIdForTesting(): String? = _currentUserId.value
     internal fun customerForTesting(): Pair<String?, String?> = customerName to customerEmail
 
     /** Test-only: the Play sync queue owned by the coordinator (requires `syncPlayPurchases = true`). */
