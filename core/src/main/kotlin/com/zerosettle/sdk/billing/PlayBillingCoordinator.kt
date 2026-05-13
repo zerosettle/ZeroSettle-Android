@@ -99,6 +99,21 @@ internal class PlayBillingCoordinator(
         onEntitlementsMayHaveChanged()
     }
 
+    /**
+     * Test-only: drive a single fake [Purchase] through [processor]. Skips the
+     * surrounding `runReconcile` + `retryQueued` calls — those invoke
+     * `BillingClient.queryPurchases` which goes through `ensureConnected` on a
+     * client that has no real Play services in Robolectric (would hang or fail
+     * loudly). The deferred-bridge wiring at [com.zerosettle.sdk.ZeroSettle]'s
+     * `onPurchaseSynced` / `onPurchaseFailed` callbacks lives entirely inside
+     * the `processor.process(...)` call, so the surrounding work isn't needed
+     * for that contract test.
+     */
+    internal suspend fun processPurchaseForTesting(purchase: Purchase) {
+        val uid = userIdProvider() ?: return
+        processor.process(PlayBillingManager.describePurchase(purchase, uid, customerNameProvider(), customerEmailProvider()))
+    }
+
     private suspend fun runReconcile() {
         val uid = userIdProvider() ?: return
         val subs = billing.queryPurchases(BillingClient.ProductType.SUBS).getOrDefault(emptyList())

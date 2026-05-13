@@ -802,6 +802,21 @@ public object ZeroSettle {
     internal fun activeUserIdForTesting(): String? = _currentUserId.value
     internal fun customerForTesting(): Pair<String?, String?> = customerName to customerEmail
 
+    /**
+     * Test-only: arm [pendingPlayPurchaseDeferred] with a fresh deferred and
+     * return it so the caller can `.await()` on it. Mirrors what
+     * [purchaseViaPlayBilling] does in production — but skips the
+     * `coord.purchaseViaPlayBilling()` dialog launch, which can't run under
+     * Robolectric (real `BillingClient` connection required).
+     *
+     * Throws if a slot is already armed — the helper isn't designed for
+     * concurrent test usage.
+     */
+    internal fun armPendingPlayPurchaseForTesting(): CompletableDeferred<String> = synchronized(this) {
+        check(pendingPlayPurchaseDeferred == null) { "pendingPlayPurchaseDeferred already armed" }
+        CompletableDeferred<String>().also { pendingPlayPurchaseDeferred = it }
+    }
+
     /** Test-only: the Play sync queue owned by the coordinator (requires `syncPlayPurchases = true`). */
     internal fun playSyncQueueForTesting(): com.zerosettle.sdk.billing.PlaySyncQueue = playCoordinator!!.queue
 

@@ -86,18 +86,27 @@ internal class PurchaseSyncProcessor(
 
         return when {
             resp.owned -> {
-                if (!d.isAcknowledged) acknowledge(d.purchaseToken)
                 queue.remove(d.purchaseToken)
                 val txnId = resp.transactionId ?: ""
-                // Resolve the awaiter BEFORE emitting PurchaseSucceeded so direct
-                // callers of purchaseViaPlayBilling() complete first and observers
-                // of the events stream see a consistent ordering.
+                // Resolve the awaiter FIRST — as soon as OUR backend has recorded
+                // the purchase the user-visible operation is done. The local Play
+                // ack that follows is bookkeeping that satisfies the 3-day window
+                // rule; it must not gate the awaiter resolution because
+                // `acknowledge` going through `BillingClient.ensureConnected` can
+                // throw (no Play services in Robolectric, transient disconnect on
+                // device). A throw between the awaiter-resolve point and a now-
+                // moved-down ack would have stranded the deferred. Resolving
+                // first means even an `acknowledge` throw is harmless to the
+                // suspending caller; we still wrap it in `runCatching` so the
+                // throw doesn't surface out of `process()` and stop the
+                // coordinator's purchase loop (it's logged via the silent catch).
                 if (txnId.isNotEmpty()) {
                     onPurchaseSynced(txnId)
                 } else {
                     onPurchaseFailed(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
                 }
                 emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = d.productId, transactionId = txnId))
+                if (!d.isAcknowledged) runCatching { acknowledge(d.purchaseToken) }
                 Result.success(Unit)
             }
             resp.conflict && resp.claimAvailable -> {
