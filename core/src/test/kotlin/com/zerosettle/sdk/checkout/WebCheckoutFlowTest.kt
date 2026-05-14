@@ -1,9 +1,12 @@
 package com.zerosettle.sdk.checkout
 
+import android.app.Activity
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
 class WebCheckoutFlowTest {
@@ -32,5 +35,15 @@ class WebCheckoutFlowTest {
     @Test fun isCallbackUrl_matchesScheme() {
         assertThat(WebCheckoutFlow.isCallbackUrl("zerosettle://checkout/return?x=1")).isTrue()
         assertThat(WebCheckoutFlow.isCallbackUrl("https://api.zerosettle.io/checkout")).isFalse()
+    }
+
+    @Test fun launchWebView_startsActivityWithCheckoutUrlExtra() {
+        val activity = Robolectric.buildActivity(Activity::class.java).create().get()
+        WebCheckoutFlow.launchWebView(activity, "https://checkout.example/abc")
+        val started = shadowOf(activity).nextStartedActivity
+        assertThat(started).isNotNull()
+        assertThat(started.component?.className).isEqualTo(ZeroSettleWebViewActivity::class.java.name)
+        assertThat(started.getStringExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL))
+            .isEqualTo("https://checkout.example/abc")
     }
 }

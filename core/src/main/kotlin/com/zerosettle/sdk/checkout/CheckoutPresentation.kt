@@ -6,12 +6,18 @@ import kotlinx.serialization.Serializable
 /**
  * How the server wants the web checkout surfaced. Sent in offer / checkout-config
  * payloads. The `:ui` module's `ZeroSettleCheckoutSheet` and `ZeroSettleOfferTip`
- * map these to: an inline Compose WebView, a bottom-sheet Compose WebView, an
- * AndroidX Browser Custom Tab, or an external browser intent respectively.
+ * can map these to richer Compose presentations (inline Compose WebView, bottom
+ * sheet) when the adopter takes that dependency.
  *
- * The headless core can only realise [CUSTOM_TAB] and [BROWSER] (no Compose dep);
- * [INLINE] / [SHEET] need the UI artifact. When the headless [WebCheckoutFlow] is
- * asked to present an [INLINE] / [SHEET] offer it falls back to [CUSTOM_TAB].
+ * In the headless `:core` module:
+ *  - [CUSTOM_TAB] → AndroidX Browser Custom Tab (default safe fallback).
+ *  - [BROWSER] → external browser intent.
+ *  - [INLINE] and [SHEET] → in-app WebView hosted by
+ *    [ZeroSettleWebViewActivity], auto-registered in the SDK manifest so
+ *    every adopter (Compose-free Views, Flutter, plain Activities) gets
+ *    WebView presentation without per-host wiring. Adopters who want a
+ *    bottom-sheet look can still layer the `:ui` `ZeroSettleCheckoutSheet`
+ *    on top — that path overrides the activity launch.
  */
 @Serializable
 public enum class CheckoutPresentation {

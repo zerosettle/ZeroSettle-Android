@@ -446,6 +446,10 @@ public object ZeroSettle {
             when (resp.checkoutPresentation) {
                 com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER ->
                     com.zerosettle.sdk.checkout.WebCheckoutFlow.launchExternalBrowser(activity, resp.checkoutUrl)
+                com.zerosettle.sdk.checkout.CheckoutPresentation.INLINE,
+                com.zerosettle.sdk.checkout.CheckoutPresentation.SHEET ->
+                    com.zerosettle.sdk.checkout.WebCheckoutFlow.launchWebView(activity, resp.checkoutUrl)
+                // CUSTOM_TAB or null → safe default
                 else ->
                     com.zerosettle.sdk.checkout.WebCheckoutFlow.launchCustomTab(activity, resp.checkoutUrl)
             }

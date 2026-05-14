@@ -57,4 +57,16 @@ public object WebCheckoutFlow {
     public fun launchExternalBrowser(activity: Activity, checkoutUrl: String) {
         activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(checkoutUrl)))
     }
+
+    /**
+     * Open [checkoutUrl] in an in-app WebView ([ZeroSettleWebViewActivity]) — the
+     * presentation honored when the merchant's dashboard selected `inline` or
+     * `sheet`. Adopters using the `:ui` Compose module typically get a richer
+     * presentation from `ZeroSettleCheckoutSheet`; this activity is for headless
+     * adopters (incl. Flutter, vanilla Views, plain Activities) who can't take
+     * a Compose dependency.
+     */
+    public fun launchWebView(activity: Activity, checkoutUrl: String) {
+        activity.startActivity(ZeroSettleWebViewActivity.newIntent(activity, checkoutUrl))
+    }
 }

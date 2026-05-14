@@ -9,4 +9,20 @@
             <data android:scheme="https" />
         </intent>
     </queries>
+
+    <application>
+        <!--
+            ZeroSettleWebViewActivity — hosts INLINE/SHEET dashboard
+            presentation choices in an in-app WebView. Auto-registered so
+            adopters of the headless :core module get WebView checkout
+            without manifest edits. Uses a platform Material.Light theme
+            (no AppCompat dep in :core). `configChanges` keeps the WebView
+            alive across rotation mid-payment.
+        -->
+        <activity
+            android:name=".checkout.ZeroSettleWebViewActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+    </application>
 </manifest>
