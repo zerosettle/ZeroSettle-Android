@@ -239,9 +239,16 @@ internal class Backend(
         return http.post("/v1/iap/claim-entitlement/", body).map { }
     }
 
-    /** `GET /v1/iap/transaction-history/?user_id=…` — full transaction history (raw JSON). */
-    suspend fun fetchTransactionHistory(userId: String): Result<String> =
+    /**
+     * `GET /v1/iap/transaction-history/?user_id=…` — full transaction history
+     * for the identified user. Decoded into a typed list at the boundary;
+     * decode failures surface as [ZeroSettleError.BackendError]. Mirrors iOS
+     * Kit's `fetchTransactionHistory() -> [CheckoutTransaction]`.
+     */
+    suspend fun fetchTransactionHistory(userId: String): Result<List<com.zerosettle.sdk.models.CheckoutTransaction>> =
         http.get("/v1/iap/transaction-history/?user_id=${enc(userId)}")
+            .mapDecode(TransactionHistoryResponse.serializer())
+            .map { it.transactions }
 
     /**
      * `GET /v1/iap/transactions/<transactionId>/` — hydrated single-transaction record.
@@ -456,6 +463,11 @@ internal data class BulkReconcileResponse(
     val processed: Int = 0,
     @SerialName("events_emitted") val eventsEmitted: Int = 0,
     val skipped: List<JsonObject> = emptyList(),
+)
+
+@Serializable
+internal data class TransactionHistoryResponse(
+    val transactions: List<com.zerosettle.sdk.models.CheckoutTransaction> = emptyList(),
 )
 
 @Serializable

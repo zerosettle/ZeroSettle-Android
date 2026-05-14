@@ -76,11 +76,68 @@ class ZeroSettlePublicApiTest {
         assertThat(ZeroSettle.entitlements.value).hasSize(1)
     }
 
-    @Test fun fetchTransactionHistory_afterIdentify_returnsRawJson() = runTest {
+    @Test fun fetchTransactionHistory_afterIdentify_returnsEmptyList() = runTest {
         identifyU1()
         server.enqueue(MockResponse().setBody("""{"transactions":[]}"""))
         val res = ZeroSettle.fetchTransactionHistory()
         assertThat(res.isSuccess).isTrue()
-        assertThat(res.getOrNull()).contains("transactions")
+        assertThat(res.getOrNull()).isEmpty()
+    }
+
+    @Test fun fetchTransactionHistory_decodesWireShape() = runTest {
+        identifyU1()
+        val body = """
+        {
+          "transactions": [
+            {
+              "id": "txn_1",
+              "product_id": "pro_monthly",
+              "status": "completed",
+              "source": "web_checkout",
+              "purchased_at": "2026-05-11T00:00:00Z",
+              "expires_at": "2026-06-11T00:00:00Z",
+              "product_name": "Pro Monthly",
+              "amount_cents": 599,
+              "currency": "usd",
+              "storekit_status": null
+            },
+            {
+              "id": "txn_2",
+              "product_id": "lifetime",
+              "status": "refunded",
+              "source": "store_kit",
+              "purchased_at": "2026-04-01T00:00:00Z",
+              "expires_at": null,
+              "product_name": "Lifetime",
+              "amount_cents": 4999,
+              "currency": "usd",
+              "storekit_status": 5
+            }
+          ]
+        }
+        """.trimIndent()
+        server.enqueue(MockResponse().setBody(body))
+        val res = ZeroSettle.fetchTransactionHistory()
+        assertThat(res.isSuccess).isTrue()
+        val list = res.getOrNull()!!
+        assertThat(list).hasSize(2)
+        assertThat(list[0].id).isEqualTo("txn_1")
+        assertThat(list[0].productId).isEqualTo("pro_monthly")
+        assertThat(list[0].status).isEqualTo(com.zerosettle.sdk.models.CheckoutTransaction.Status.COMPLETED)
+        assertThat(list[0].source).isEqualTo(com.zerosettle.sdk.models.EntitlementSource.WEB_CHECKOUT)
+        assertThat(list[0].amountCents).isEqualTo(599)
+        assertThat(list[0].currency).isEqualTo("usd")
+        assertThat(list[0].storekitStatus).isNull()
+        assertThat(list[1].status).isEqualTo(com.zerosettle.sdk.models.CheckoutTransaction.Status.REFUNDED)
+        assertThat(list[1].source).isEqualTo(com.zerosettle.sdk.models.EntitlementSource.STORE_KIT)
+        assertThat(list[1].storekitStatus).isEqualTo(5)
+    }
+
+    @Test fun fetchTransactionHistory_malformedBody_returnsBackendError() = runTest {
+        identifyU1()
+        server.enqueue(MockResponse().setBody("""not json"""))
+        val res = ZeroSettle.fetchTransactionHistory()
+        assertThat(res.isFailure).isTrue()
+        assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.BackendError::class.java)
     }
 }

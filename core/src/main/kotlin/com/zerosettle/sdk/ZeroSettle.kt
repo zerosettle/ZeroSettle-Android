@@ -412,10 +412,16 @@ public object ZeroSettle {
     }
 
     /**
-     * Fetch the identified user's full transaction history as raw JSON
-     * (`GET /v1/iap/transaction-history/`). The typed model lands in a later phase.
+     * Fetch the identified user's full transaction history
+     * (`GET /v1/iap/transaction-history/`) as a typed list. Mirrors iOS
+     * Kit's `fetchTransactionHistory() -> [CheckoutTransaction]`.
+     *
+     * @return `Result.success(List<CheckoutTransaction>)` on a 2xx + decodable
+     *   body; `Result.failure(ZeroSettleError.UserNotIdentified)` when no user
+     *   is identified; `Result.failure(ZeroSettleError.BackendError(...))` for
+     *   non-2xx responses *or* a 2xx response that fails to decode.
      */
-    public suspend fun fetchTransactionHistory(): Result<String> {
+    public suspend fun fetchTransactionHistory(): Result<List<com.zerosettle.sdk.models.CheckoutTransaction>> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
         return be.fetchTransactionHistory(uid)

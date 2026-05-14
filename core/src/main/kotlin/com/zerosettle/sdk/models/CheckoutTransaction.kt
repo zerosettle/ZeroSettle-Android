@@ -26,6 +26,14 @@ public data class CheckoutTransaction(
     @SerialName("product_name") val productName: String? = null,
     @SerialName("amount_cents") val amountCents: Int? = null,
     val currency: String? = null,
+    /**
+     * StoreKit subscription lifecycle status from the backend (Apple
+     * `Product.SubscriptionInfo.RenewalState` raw values:
+     * `1`=subscribed, `2`=expired, `3`=billingRetry, `4`=gracePeriod, `5`=revoked).
+     * `null` when the transaction is not a StoreKit subscription. Mirrors
+     * iOS Kit's `CheckoutTransaction.storekitStatus`.
+     */
+    @SerialName("storekit_status") val storekitStatus: Int? = null,
 ) {
     /**
      * Lifecycle state for a transaction record.

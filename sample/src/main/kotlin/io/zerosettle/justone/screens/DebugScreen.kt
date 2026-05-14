@@ -111,7 +111,23 @@ fun DebugScreen() {
                     OutlinedButton(onClick = {
                         scope.launch {
                             val r = ZeroSettle.fetchTransactionHistory()
-                            txnHistory = if (r.isSuccess) r.getOrNull() else "failed: ${r.exceptionOrNull()?.message}"
+                            txnHistory = if (r.isSuccess) {
+                                val list = r.getOrNull().orEmpty()
+                                buildString {
+                                    append(list.size).append(" txns\n")
+                                    list.forEach { t ->
+                                        append("• ").append(t.id)
+                                            .append(" ").append(t.productId)
+                                            .append(" ").append(t.status.wire)
+                                            .append(" ").append(t.source.wire)
+                                            .append(" ").append(t.amountCents ?: "—")
+                                            .append(" ").append(t.currency ?: "—")
+                                            .append("\n")
+                                    }
+                                }
+                            } else {
+                                "failed: ${r.exceptionOrNull()?.message}"
+                            }
                         }
                     }) { Text("Fetch txn history") }
                     OutlinedButton(onClick = { scope.launch { ZeroSettle.fetchProducts() } }) { Text("Fetch products") }
