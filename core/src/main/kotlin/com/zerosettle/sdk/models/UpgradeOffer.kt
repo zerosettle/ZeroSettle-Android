@@ -13,6 +13,13 @@ import kotlinx.serialization.Serializable
  * shape (`{available, current_product, target_product, savings_percent, upgrade_type,
  * proration, display}` — see `compute_upgrade_offer`). The fields below were the
  * chunk-4 placeholder shape and don't decode today's response.
+ *
+ * **WIRE-SHAPE DIVERGENCE (audit task #105):** calling
+ * [com.zerosettle.sdk.ZeroSettle.fetchUpgradeOfferConfig] today crashes decode
+ * with `MissingFieldException` — `from_product_id` / `to_product_id` are
+ * required, but the backend emits `current_product` / `target_product` as
+ * nested objects. Use the unified [UserOffer] (`fetchUserOffer()`) instead,
+ * which DOES match the live wire and covers both upgrade and migration flows.
  */
 public object UpgradeOffer {
 

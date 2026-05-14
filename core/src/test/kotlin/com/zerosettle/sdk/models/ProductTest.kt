@@ -10,8 +10,14 @@ class ProductTest {
 
     // Wire shape mirrors api/iap_views.py:get_products exactly: prices are
     // `amount_micros` (cents × 10,000), App Store price ships under the wire
-    // key `storekit_price`. iOS Kit decodes the same payload — diverging here
+    // key `storekit_price`, "synced to App Store Connect" ships as
+    // `synced_to_asc`. iOS Kit decodes the same payload — diverging here
     // means the SDK fails decode against the live backend.
+    //
+    // NB: `billing_interval` is intentionally absent — the canonical product
+    // catalog does not emit a per-product billing cadence (clients derive it
+    // from product metadata). The SDK keeps the field as a nullable
+    // forward-compat slot in case the backend starts emitting it.
     private val fixture = """
     {
       "id": "pro_monthly",
@@ -21,8 +27,7 @@ class ProductTest {
       "web_price": { "amount_micros": 4990000, "currency_code": "USD" },
       "storekit_price": { "amount_micros": 5990000, "currency_code": "USD" },
       "play_store_price": { "amount_micros": 5490000, "currency_code": "USD" },
-      "synced_to_app_store_connect": true,
-      "billing_interval": "month",
+      "synced_to_asc": true,
       "subscription_group_id": 7,
       "free_trial_duration": "P7D",
       "is_trial_eligible": true,
@@ -40,7 +45,8 @@ class ProductTest {
         assertThat(p.webPrice?.currencyCode).isEqualTo("USD")
         assertThat(p.appStorePrice?.amountCents).isEqualTo(599)
         assertThat(p.playStorePrice?.amountCents).isEqualTo(549)
-        assertThat(p.billingInterval).isEqualTo(BillingInterval.MONTH)
+        assertThat(p.syncedToAppStoreConnect).isTrue()
+        assertThat(p.billingInterval).isNull()
         assertThat(p.freeTrialDuration).isEqualTo("P7D")
         assertThat(p.isTrialEligible).isTrue()
         assertThat(p.playProductId).isEqualTo("pro_monthly_play")

@@ -1,13 +1,56 @@
 package com.zerosettle.sdk.models
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
-@Serializable
-public enum class EntitlementSource {
-    @SerialName("store_kit") STORE_KIT,
-    @SerialName("web_checkout") WEB_CHECKOUT,
-    @SerialName("play_store") PLAY_STORE,
+/**
+ * Storefront that owns an entitlement / transaction.
+ *
+ * [UNKNOWN] is the forward-compat fallback: backend may emit a new source
+ * value (e.g., a future storefront, or a misconfiguration leaking the raw
+ * server-side enum string) and we'd rather hand callers a value that
+ * compares !=  to the three known sources than crash the entire decode.
+ * Mirrors the [EntitlementStatus.UNKNOWN] pattern already in this file.
+ *
+ * The raw wire string for an [UNKNOWN] value is not preserved on the
+ * decoded object — that's a deliberate trade-off vs. [EntitlementStatus]
+ * (which DOES preserve [Entitlement.statusRaw]) because no consumer in
+ * the SDK reads it. Add it if a use case appears.
+ */
+@Serializable(with = EntitlementSourceSerializer::class)
+public enum class EntitlementSource(public val wire: String) {
+    STORE_KIT("store_kit"),
+    WEB_CHECKOUT("web_checkout"),
+    PLAY_STORE("play_store"),
+    UNKNOWN("");
+
+    public companion object {
+        public fun fromWire(value: String): EntitlementSource =
+            values().firstOrNull { it.wire == value } ?: UNKNOWN
+    }
+}
+
+/**
+ * String-backed serializer for [EntitlementSource] with an [EntitlementSource.UNKNOWN]
+ * fallback for unrecognized wire values. Without this, a decode error on `source`
+ * would crash the entire surrounding [Entitlement] / [CheckoutTransaction] decode.
+ */
+internal object EntitlementSourceSerializer : KSerializer<EntitlementSource> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("EntitlementSource", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): EntitlementSource =
+        EntitlementSource.fromWire(decoder.decodeString())
+
+    override fun serialize(encoder: Encoder, value: EntitlementSource) {
+        encoder.encodeString(value.wire)
+    }
 }
 
 /**
@@ -44,6 +87,10 @@ public data class Entitlement(
     @SerialName("cancelled_at") val cancelledAt: String? = null,
     @SerialName("purchased_at") val purchasedAt: String? = null,
     @SerialName("subscription_group_id") val subscriptionGroupId: String? = null,
+    // Forward-compat slots — the entitlements endpoint does NOT currently
+    // emit these fields (the IDs live on the Transaction row, not on the
+    // EntitlementState surface). Kept nullable so the SDK is ready when
+    // the backend exposes them.
     @SerialName("storekit_original_transaction_id") val storekitOriginalTransactionId: String? = null,
     @SerialName("play_purchase_token") val playPurchaseToken: String? = null,
 ) {

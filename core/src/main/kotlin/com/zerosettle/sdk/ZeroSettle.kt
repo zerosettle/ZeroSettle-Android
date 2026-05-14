@@ -14,6 +14,9 @@ import com.zerosettle.sdk.models.ProductCatalog
 import com.zerosettle.sdk.models.ZeroSettleError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -62,15 +65,37 @@ public object ZeroSettle {
         private set
 
     internal val scope: ZeroSettleScope = ZeroSettleScope()
+
+    /**
+     * Process-lifetime IO scope. Survives [logout] (which cancels [scope] via
+     * [ZeroSettleScope.reset]) so that fire-and-forget persistence — DataStore
+     * writes from [setCustomer], [configure], [logout] — completes even when
+     * the caller-visible scope has been torn down.
+     */
+    private val ioScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private const val DEFAULT_BASE_URL = "https://api.zerosettle.io"
 
     /** The published SDK version (wired from `BuildConfig`, set by `gradle.properties`). */
     public val sdkVersion: String get() = BuildConfig.ZEROSETTLE_SDK_VERSION
 
-    /** Call once at `Application.onCreate()`. Safe to call again to swap config. */
+    /**
+     * Call once at `Application.onCreate()`. Safe to call again to swap config.
+     *
+     * Synchronously installs the new configuration (context / store / backend
+     * / poller / coordinator) so callers that immediately read
+     * [isConfigured] / use any other API see a consistent state. Side effects
+     * that don't gate readiness — tearing down a prior [PlayBillingCoordinator]
+     * if the SDK is being re-configured — run on [Dispatchers.IO] via [ioScope]
+     * so the calling thread (typically Main, at app startup) is not blocked
+     * on `BillingClient.endConnection()` or unregistering network callbacks.
+     */
     public fun configure(context: Context, config: ZeroSettleConfig) {
         // Re-configure: tear down any prior Play coordinator / poller so they don't leak.
-        playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
+        // Coordinator.shutdown() is idempotent (clears queue, runCatching on the
+        // network callback unregister) so launching off-thread is safe even if
+        // the new coordinator boots before the old one finishes tearing down.
+        playCoordinator?.let { coord -> ioScope.launch { coord.shutdown() } }
         playCoordinator = null
         entitlementPoller?.stop()
         entitlementPoller = null
@@ -206,22 +231,64 @@ public object ZeroSettle {
         return Result.success(products)
     }
 
-    /** Update customer metadata for subsequent checkouts / syncs. */
+    /**
+     * Update customer metadata for subsequent checkouts / syncs.
+     *
+     * In-memory state ([customerName] / [customerEmail], read by every
+     * downstream consumer — `PlayBillingCoordinator`, the checkout request
+     * builder) updates synchronously so the next `purchase()` sees the new
+     * values immediately. DataStore persistence is fire-and-forget on
+     * [ioScope] so callers that invoke this from the Main thread (typical
+     * for UI-driven name/email edits) are not blocked on disk I/O.
+     *
+     * **Concurrency note:** in-memory state is authoritative for every
+     * runtime read. Two rapid `setCustomer(...)` calls launch two ioScope
+     * writers; DataStore serializes via its per-store mutex but does not
+     * guarantee FIFO acquisition order, so the *persisted* value across
+     * process death could reflect an earlier call. This is acceptable — the
+     * next live `setCustomer` (or identify) immediately re-overwrites both
+     * in-memory + DataStore. Adopters who require deterministic last-write
+     * persistence should serialize their own callers.
+     */
     public fun setCustomer(name: String? = null, email: String? = null) {
         if (name != null) customerName = name
         if (email != null) customerEmail = email
         identityStore?.let { store ->
-            runBlocking { store.setCustomer(name = customerName, email = customerEmail) }
+            // Snapshot the fields the writer should persist; subsequent
+            // setCustomer() calls update in-memory state for the next
+            // launch but don't reach into this coroutine.
+            val nameToPersist = customerName
+            val emailToPersist = customerEmail
+            ioScope.launch { store.setCustomer(name = nameToPersist, email = emailToPersist) }
         }
     }
 
-    /** Clear identity, customer metadata, sync queue. Cancels in-flight background work. */
+    /**
+     * Clear identity, customer metadata, sync queue. Cancels in-flight background work.
+     *
+     * In-memory state (StateFlows, identity, customer metadata) is cleared
+     * synchronously so observers see a logged-out SDK before the method
+     * returns. The Play coordinator shutdown and DataStore clear are
+     * dispatched to [ioScope]; the calling thread (typically Main, called
+     * from a UI handler) is not blocked on `BillingClient.endConnection()`
+     * or DataStore disk writes.
+     */
     public fun logout() {
-        // Shut the Play coordinator down BEFORE cancelling the scope so its shutdown
-        // work doesn't run against a cancelled scope; recreate it so a subsequent
-        // identify() re-enables Play sync.
+        // Snapshot the old coordinator + identity store BEFORE we recreate
+        // them. The shutdown / clear runs on ioScope after this method
+        // returns, against these snapshotted references.
+        val oldCoordinator = playCoordinator
+        val oldIdentityStore = identityStore
         entitlementPoller?.stop()
-        playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
+        // Clear the pending Play sync queue SYNCHRONOUSLY (not via ioScope)
+        // before we relinquish the coordinator reference. The queue is keyed
+        // by user identity; once we set _currentUserId to null and rebuild
+        // the coordinator, an in-flight sync from the old user must not be
+        // observable. The clear() call is a single DataStore key removal —
+        // bounded, and small enough that the calling thread isn't ANR-prone
+        // here (the heavy work is `BillingClient.endConnection()` below).
+        oldCoordinator?.let { coord -> runBlocking { coord.queue.clear() } }
+        playCoordinator = null
         scope.reset()
         _currentUserId.value = null
         customerName = null
@@ -231,8 +298,17 @@ public object ZeroSettle {
         _entitlements.value = emptyList()
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
-        identityStore?.let { store -> runBlocking { store.clear() } }
+        // Rebuild the coordinator synchronously so a subsequent identify()
+        // re-enables Play sync immediately. The OLD coordinator's shutdown
+        // (clearing the queue, unregistering the network callback, ending
+        // the Billing connection) is fire-and-forget on ioScope —
+        // PlayBillingCoordinator.shutdown is idempotent and the new
+        // coordinator boots its own BillingClient session.
         playCoordinator = buildPlayCoordinator()
+        ioScope.launch {
+            oldCoordinator?.shutdown()
+            oldIdentityStore?.clear()
+        }
     }
 
     // ─── Observables ────────────────────────────────────────────────────────

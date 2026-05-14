@@ -218,7 +218,17 @@ internal class Backend(
         return http.post("/v1/iap/upgrade-offer/execute/", body).mapDecode(ExecuteUpgradeResponse.serializer())
     }
 
-    /** `POST /v1/iap/claim-entitlement/` — explicit cross-account ownership transfer. */
+    /**
+     * `POST /v1/iap/claim-entitlement/` — explicit cross-account ownership transfer.
+     *
+     * **BACKEND GAP (audit task #115):** the backend handler today requires a
+     * `jws_representation` (an Apple-signed StoreKit JWS) and validates it
+     * before transferring. There is no Play-side analogue, so this method
+     * cannot fulfill a Play claim — the backend will 400 on a missing JWS.
+     * A separate ``claim-play-entitlement/`` endpoint (or a polymorphic body)
+     * is needed before [com.zerosettle.sdk.ZeroSettle.transferPlayOwnershipToCurrentUser]
+     * is functional end-to-end on Android.
+     */
     suspend fun claimEntitlement(
         userId: String,
         productId: String,
@@ -401,6 +411,20 @@ internal data class PlaySyncRequest(
     @SerialName("customer_email") val customerEmail: String?,
 )
 
+/**
+ * Response from `POST /v1/iap/play-store-transactions/`.
+ *
+ * **WIRE-SHAPE DIVERGENCE (audit task #115):** the backend handler today
+ * synchronously returns only `{status: "queued", event_id: <int>}` (HTTP 202 —
+ * the actual sync runs in a Celery worker on the shared Pub/Sub topic). The
+ * SDK fields below are aspirational — every one carries a default, so decode
+ * succeeds but `owned`/`transactionId`/etc. are always the default values
+ * today. The SDK's purchase flow currently relies on the BillingClient
+ * listener + the deferred-bridge in `PlayBillingCoordinator` (see
+ * `onPurchaseSynced`) instead of this response. Realigning means either (a)
+ * making the endpoint synchronous in the Play SDK path, or (b) reshaping the
+ * SDK to wait on the listener exclusively and dropping these fields.
+ */
 @Serializable
 internal data class PlaySyncResponse(
     val owned: Boolean = false,

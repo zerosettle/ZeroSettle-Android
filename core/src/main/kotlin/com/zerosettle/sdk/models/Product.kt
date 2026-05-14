@@ -100,7 +100,14 @@ public data class Product(
     // as a nullable forward-compat slot; rename / drop when the catalog
     // serializer in api/iap_views.py:get_products learns to emit it.
     @SerialName("play_store_price") val playStorePrice: Price? = null,
-    @SerialName("synced_to_app_store_connect") val syncedToAppStoreConnect: Boolean = false,
+    // Backend wire key is ``synced_to_asc`` (api/iap_views.py:get_products), not
+    // ``synced_to_app_store_connect``. The legacy key was never emitted, so
+    // this field silently defaulted to ``false`` for every adopter.
+    @SerialName("synced_to_asc") val syncedToAppStoreConnect: Boolean = false,
+    // Forward-compat slot — the canonical Product catalog response does not
+    // currently emit ``billing_interval`` (subscription cadence is derived
+    // client-side from product metadata). Kept nullable so the field is
+    // available if the backend starts emitting it.
     @SerialName("billing_interval") val billingInterval: BillingInterval? = null,
     @SerialName("subscription_group_id") val subscriptionGroupId: Int? = null,
     @SerialName("free_trial_duration") val freeTrialDuration: String? = null,
