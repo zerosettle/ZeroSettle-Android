@@ -1,4 +1,4 @@
-package com.zerosettle.sample
+package io.zerosettle.justone
 
 import android.content.Context
 import com.zerosettle.sdk.ZeroSettle

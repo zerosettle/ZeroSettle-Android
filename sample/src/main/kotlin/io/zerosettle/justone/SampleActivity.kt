@@ -1,4 +1,4 @@
-package com.zerosettle.sample
+package io.zerosettle.justone
 
 import android.content.Intent
 import android.os.Bundle
@@ -20,14 +20,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.zerosettle.sample.screens.CancelFlowScreen
-import com.zerosettle.sample.screens.DebugScreen
-import com.zerosettle.sample.screens.EntitlementsScreen
-import com.zerosettle.sample.screens.HomeScreen
-import com.zerosettle.sample.screens.OffersScreen
-import com.zerosettle.sample.screens.PendingActionsScreen
-import com.zerosettle.sample.screens.SignInScreen
-import com.zerosettle.sample.screens.UpgradeOfferScreen
+import io.zerosettle.justone.screens.CancelFlowScreen
+import io.zerosettle.justone.screens.DebugScreen
+import io.zerosettle.justone.screens.EntitlementsScreen
+import io.zerosettle.justone.screens.HomeScreen
+import io.zerosettle.justone.screens.OffersScreen
+import io.zerosettle.justone.screens.PendingActionsScreen
+import io.zerosettle.justone.screens.SignInScreen
+import io.zerosettle.justone.screens.UpgradeOfferScreen
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.ui.theme.ZeroSettleTheme
 import kotlinx.coroutines.launch

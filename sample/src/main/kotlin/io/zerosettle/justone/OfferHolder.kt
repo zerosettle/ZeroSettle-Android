@@ -1,4 +1,4 @@
-package com.zerosettle.sample
+package io.zerosettle.justone
 
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.offers.OfferManager

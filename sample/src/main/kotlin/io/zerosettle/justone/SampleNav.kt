@@ -1,4 +1,4 @@
-package com.zerosettle.sample
+package io.zerosettle.justone
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt

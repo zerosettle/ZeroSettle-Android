@@ -1,4 +1,4 @@
-package com.zerosettle.sample.screens
+package io.zerosettle.justone.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

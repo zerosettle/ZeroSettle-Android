@@ -1,4 +1,4 @@
-package com.zerosettle.sample.screens
+package io.zerosettle.justone.screens
 
 import android.content.Intent
 import android.net.Uri

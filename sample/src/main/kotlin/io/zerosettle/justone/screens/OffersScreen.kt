@@ -1,4 +1,4 @@
-package com.zerosettle.sample.screens
+package io.zerosettle.justone.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,7 +23,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.zerosettle.sample.OfferHolder
+import io.zerosettle.justone.OfferHolder
 import com.zerosettle.ui.ZeroSettleCheckoutHost
 import com.zerosettle.ui.ZeroSettleOfferTip
 import kotlinx.coroutines.launch

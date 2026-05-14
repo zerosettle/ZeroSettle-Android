@@ -1,4 +1,4 @@
-package com.zerosettle.sample.screens
+package io.zerosettle.justone.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,9 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.zerosettle.sample.OfferHolder
-import com.zerosettle.sample.SampleConfig
-import com.zerosettle.sample.configureSdk
+import io.zerosettle.justone.OfferHolder
+import io.zerosettle.justone.SampleConfig
+import io.zerosettle.justone.configureSdk
 import com.zerosettle.sdk.Identity
 import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.launch

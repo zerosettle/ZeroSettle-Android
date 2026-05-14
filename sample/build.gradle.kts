@@ -23,11 +23,11 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "com.zerosettle.sample"
+    namespace = "io.zerosettle.justone"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.zerosettle.sample"
+        applicationId = "io.zerosettle.justone"
         minSdk = 23
         targetSdk = 36
         versionCode = 1

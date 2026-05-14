@@ -1,4 +1,4 @@
-package com.zerosettle.sample.screens
+package io.zerosettle.justone.screens
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -30,8 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.zerosettle.sample.OfferHolder
-import com.zerosettle.sample.SampleConfig
+import io.zerosettle.justone.OfferHolder
+import io.zerosettle.justone.SampleConfig
 import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
