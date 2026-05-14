@@ -62,8 +62,11 @@ fun SignInScreen(onIdentified: () -> Unit) {
         SampleConfig.saveEnv(ctx, newEnv)
         if (newEnv == SampleConfig.Env.CUSTOM) SampleConfig.saveCustomUrl(ctx, newCustomUrl)
         // Re-point the SDK at the new backend. Drop any prior identity so the user
-        // re-identifies against the new env (the buttons below do that).
+        // re-identifies against the new env (the buttons below do that). Clear the
+        // persisted identity too — an account that exists on staging may not exist
+        // on production, so replaying it next launch would 404.
         ZeroSettle.logout()
+        SampleConfig.clearIdentity(ctx)
         OfferHolder.reset()
         configureSdk(ctx)
         effectiveUrl = SampleConfig.effectiveBaseUrl(ctx)
@@ -75,6 +78,9 @@ fun SignInScreen(onIdentified: () -> Unit) {
         scope.launch {
             val r = ZeroSettle.identify(identity)
             if (r.isSuccess) {
+                // Persist the choice so the user isn't re-prompted on next
+                // cold start — replayed by SampleActivity's LaunchedEffect.
+                SampleConfig.saveIdentity(ctx, identity)
                 OfferHolder.reset()
                 status = "Identified ($effectiveUrl). bootstrapped=${ZeroSettle.isBootstrapped.value}"
                 onIdentified()
@@ -148,6 +154,7 @@ fun SignInScreen(onIdentified: () -> Unit) {
         TextButton(
             onClick = {
                 ZeroSettle.logout()
+                SampleConfig.clearIdentity(ctx)
                 OfferHolder.reset()
                 status = "Logged out."
             },

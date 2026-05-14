@@ -31,6 +31,7 @@ import com.zerosettle.sample.screens.UpgradeOfferScreen
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.ui.theme.ZeroSettleTheme
 import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
 
 class SampleActivity : ComponentActivity() {
 
@@ -41,11 +42,48 @@ class SampleActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 ZeroSettleTheme {
+                    val ctx = LocalContext.current
                     val nav = rememberNavController()
                     val bootstrapped by ZeroSettle.isBootstrapped.collectAsState()
+                    val configured by ZeroSettle.isConfigured.collectAsState()
                     val backStack by nav.currentBackStackEntryAsState()
                     val currentRoute = backStack?.destination?.route
                     val showBottomBar = bootstrapped && currentRoute != null && currentRoute != Routes.SIGN_IN
+
+                    // Cold-start identity replay. Mirrors the JustOne iOS
+                    // sample: if the user previously identified, route them
+                    // straight to HOME — don't make them re-pick their
+                    // account every launch. Persisted identity lives in
+                    // SampleConfig (SharedPreferences); cleared on explicit
+                    // logout / env switch.
+                    //
+                    // Guard with `bootstrapped` so we don't replay over an
+                    // already-active identity (e.g. when the activity
+                    // recreates after a config change with a live SDK).
+                    LaunchedEffect(configured) {
+                        if (!configured || bootstrapped) return@LaunchedEffect
+                        val saved = SampleConfig.loadIdentity(ctx) ?: return@LaunchedEffect
+                        val r = ZeroSettle.identify(saved)
+                        if (r.isFailure) {
+                            // Stale or invalid identity — drop it and fall
+                            // through to SignInScreen so the user can pick
+                            // a fresh one.
+                            SampleConfig.clearIdentity(ctx)
+                        }
+                    }
+
+                    // Once bootstrapped, jump past SIGN_IN. Covers both the
+                    // cold-start replay path above and the manual-sign-in
+                    // path from SignInScreen (which already calls
+                    // onIdentified → nav.navigate(HOME)).
+                    LaunchedEffect(bootstrapped) {
+                        if (bootstrapped && currentRoute == Routes.SIGN_IN) {
+                            nav.navigate(Routes.HOME) {
+                                popUpTo(Routes.SIGN_IN) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        }
+                    }
 
                     // If identity is dropped (e.g. logout from the Debug screen), return to sign-in.
                     LaunchedEffect(bootstrapped, currentRoute) {
