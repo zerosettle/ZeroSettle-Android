@@ -63,6 +63,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.truth)
+    testImplementation(libs.androidx.lifecycle.runtime.testing)
 }
 
 mavenPublishing {

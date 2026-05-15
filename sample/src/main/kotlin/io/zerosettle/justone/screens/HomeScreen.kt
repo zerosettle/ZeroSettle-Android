@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.zerosettle.justone.OfferHolder
 import com.zerosettle.sdk.ZeroSettle
+import com.zerosettle.sdk.checkout.CheckoutPresentation
 import com.zerosettle.sdk.models.Price
 import com.zerosettle.ui.ZeroSettleCheckoutHost
 import com.zerosettle.ui.ZeroSettleOfferTip
@@ -95,7 +96,15 @@ fun HomeScreen() {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = {
                                 scope.launch {
-                                    val r = ZeroSettle.purchase(activity, p.id)
+                                    // Pass INLINE to force the embedded WebView regardless of
+                                    // server config — the backend doesn't emit a presentation
+                                    // hint on regular create_checkout_session responses yet,
+                                    // so the null default would fall through to Custom Tab.
+                                    val r = ZeroSettle.purchase(
+                                        activity = activity,
+                                        productId = p.id,
+                                        presentation = CheckoutPresentation.INLINE,
+                                    )
                                     lastAction = if (r.isSuccess) "web checkout completed: txn=${r.getOrNull()?.id}" else "web purchase failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }) { Text("Buy — Web") }
@@ -105,6 +114,18 @@ fun HomeScreen() {
                                     lastAction = if (r.isSuccess) "Play purchase completed: txn=${r.getOrNull()?.id}" else "Play purchase failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }) { Text("Buy — Google Play") }
+                            OutlinedButton(onClick = {
+                                scope.launch {
+                                    // Sibling button to compare the Custom Tab presentation
+                                    // path — exercises the auto-cancel-on-dismiss watcher.
+                                    val r = ZeroSettle.purchase(
+                                        activity = activity,
+                                        productId = p.id,
+                                        presentation = CheckoutPresentation.CUSTOM_TAB,
+                                    )
+                                    lastAction = if (r.isSuccess) "Custom-tab checkout completed: txn=${r.getOrNull()?.id}" else "Custom-tab purchase failed: ${r.exceptionOrNull()?.message}"
+                                }
+                            }) { Text("Buy — Custom Tab") }
                         }
                     }
                 }

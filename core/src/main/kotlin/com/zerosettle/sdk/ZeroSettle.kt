@@ -485,10 +485,33 @@ public object ZeroSettle {
      * is cleared so a subsequent [purchase] call isn't blocked. The SDK's
      * deep-link side effects (entitlement refresh, event emission) still fire
      * normally when the callback eventually arrives.
+     *
+     * @param presentation Optional per-call presentation override. When non-null,
+     *   beats whatever the backend response specifies. Mirrors iOS Kit's
+     *   `presentation: CheckoutType?` parameter on `ZeroSettle.shared.purchase`.
+     *   Use [com.zerosettle.sdk.checkout.CheckoutPresentation.INLINE] /
+     *   [com.zerosettle.sdk.checkout.CheckoutPresentation.SHEET] to route
+     *   through the in-app [com.zerosettle.sdk.checkout.ZeroSettleWebViewActivity]
+     *   regardless of server configuration. Use
+     *   [com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER] for external
+     *   browser. Pass `null` to defer to the server's response field (today
+     *   that defaults to [com.zerosettle.sdk.checkout.CheckoutPresentation.CUSTOM_TAB]
+     *   since backend doesn't emit a presentation hint on regular
+     *   `create_checkout_session` responses yet).
+     *
+     * When the resolved presentation routes to a Chrome Custom Tab and
+     * [activity] is a [androidx.lifecycle.LifecycleOwner], the SDK installs a
+     * one-shot lifecycle watcher that auto-cancels the in-flight checkout if
+     * the host Activity resumes without a deep-link arriving (Chrome Custom
+     * Tabs don't notify the host on user dismissal). Hosts whose Activity is
+     * not a `LifecycleOwner` can call [releasePendingCheckout] manually from
+     * `onResume()`. The in-app WebView and external browser paths handle
+     * their own cancellation and don't need either mechanism.
      */
     public suspend fun purchase(
         activity: android.app.Activity,
         productId: String,
+        presentation: com.zerosettle.sdk.checkout.CheckoutPresentation? = null,
     ): Result<com.zerosettle.sdk.models.CheckoutTransaction> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
@@ -525,15 +548,34 @@ public object ZeroSettle {
         // StateFlow consumers don't see a stale `true` after a cancelled checkout.
         _pendingCheckout.value = true
         try {
-            when (resp.checkoutPresentation) {
+            // Per-call override beats server-driven setting. iOS pattern:
+            // `effectiveType = presentation ?? checkoutType`. We have no global
+            // `checkoutType` field on Android yet (remoteConfig surface is absent
+            // — see the parity audit), so the fallback is server response →
+            // CUSTOM_TAB.
+            val effectivePresentation = presentation ?: resp.checkoutPresentation
+            when (effectivePresentation) {
                 com.zerosettle.sdk.checkout.CheckoutPresentation.BROWSER ->
                     com.zerosettle.sdk.checkout.WebCheckoutFlow.launchExternalBrowser(activity, resp.checkoutUrl)
                 com.zerosettle.sdk.checkout.CheckoutPresentation.INLINE,
                 com.zerosettle.sdk.checkout.CheckoutPresentation.SHEET ->
                     com.zerosettle.sdk.checkout.WebCheckoutFlow.launchWebView(activity, resp.checkoutUrl)
                 // CUSTOM_TAB or null → safe default
-                else ->
+                else -> {
                     com.zerosettle.sdk.checkout.WebCheckoutFlow.launchCustomTab(activity, resp.checkoutUrl)
+                    // Chrome Custom Tabs don't notify the host Activity on user
+                    // dismissal. Install a one-shot Lifecycle watcher (when the
+                    // Activity is a LifecycleOwner — modern ComponentActivity /
+                    // AppCompatActivity / FlutterActivity all are) that auto-
+                    // cancels the in-flight checkout if the host resumes after
+                    // a pause without a deep-link arriving. Adopters with
+                    // non-LifecycleOwner activities must call
+                    // releasePendingCheckout() manually from onResume().
+                    val lifecycleOwner = activity as? androidx.lifecycle.LifecycleOwner
+                    if (lifecycleOwner != null) {
+                        installCustomTabDismissalWatcher(lifecycleOwner, deferred)
+                    }
+                }
             }
 
             val transactionId: String = try {
@@ -599,6 +641,136 @@ public object ZeroSettle {
             }
         }
     }
+
+    /**
+     * Cancel any in-flight web checkout that hasn't received a deep-link
+     * return. Resolves [pendingCheckout] back to `false` and completes the
+     * awaiting [purchase] coroutine with `Result.failure(PurchaseCancelled)`.
+     *
+     * Hosts that launch a [com.zerosettle.sdk.checkout.CheckoutPresentation.CUSTOM_TAB]
+     * flow should call this from their Activity's `onResume()` when control
+     * returns without a deep-link intent — Chrome Custom Tabs don't notify the
+     * host on user dismissal, so a stale slot would prevent any subsequent
+     * purchase. The in-app WebView and external browser paths handle their own
+     * cancellation and do NOT need this call.
+     *
+     * Note: hosts whose launch Activity is an
+     * [androidx.lifecycle.LifecycleOwner] (every modern `ComponentActivity` /
+     * `AppCompatActivity` / `FlutterActivity` is) get auto-cancel via a
+     * Lifecycle watcher installed by [purchase] on the Custom Tab path; manual
+     * calls to this method are only required for non-LifecycleOwner hosts.
+     *
+     * Adopters can also call this defensively from `onStop` / app-background
+     * transitions if their UX requires it. Idempotent: no-op when no checkout
+     * is in flight.
+     *
+     * **Concurrency note.** The `synchronized(this)` snapshot below pairs with
+     * the same lock taken in [purchase] when arming the slot. The slot
+     * clear in [purchase]'s `finally` block (line ~552) is a bare null-write
+     * NOT under the lock — that's intentional and harmless: both writes go to
+     * null (idempotent), and `completeExceptionally` on an already-completed
+     * deferred is a no-op. The lock here matters for the
+     * [installCustomTabDismissalWatcher] coroutine vs. a concurrent fresh
+     * [purchase] call — without it the watcher could race against a freshly-
+     * armed slot belonging to a different in-flight purchase.
+     */
+    public fun releasePendingCheckout() {
+        val deferred = synchronized(this) {
+            pendingCheckoutDeferred.also { pendingCheckoutDeferred = null }
+        } ?: return
+        deferred.completeExceptionally(ZeroSettleError.PurchaseCancelled)
+        _pendingCheckout.value = false
+    }
+
+    /**
+     * Install a one-shot Lifecycle observer on [lifecycleOwner] that calls
+     * [releasePendingCheckout] when:
+     *
+     *  - the host Activity has gone through `ON_PAUSE` at least once (the
+     *    Custom Tab launch pauses the host), AND
+     *  - subsequently fires `ON_RESUME` (control returned), AND
+     *  - after a 500ms grace window the in-flight slot ([targetDeferred]) is
+     *    still the one this watcher was installed for AND hasn't been resolved
+     *    (no deep-link arrived).
+     *
+     * The grace delay gives the deep-link intent a chance to land — when a
+     * checkout completes successfully, the host resumes via the deep-link
+     * Activity, [completeWebCheckout] resolves the deferred, and this
+     * watcher's poll becomes a no-op.
+     *
+     * The observer self-unregisters on `ON_DESTROY` so the watcher doesn't
+     * outlive the host Activity (process-death / config-kill leak guard).
+     *
+     * **`addObserver` replays state.** When attached to a currently-RESUMED
+     * lifecycle, AndroidX synthesizes `ON_CREATE` / `ON_START` / `ON_RESUME`
+     * events to bring the observer up to date. The [wasPaused] flag prevents
+     * a spurious fire on install — only the RESUME *following* a PAUSE counts
+     * as a Custom Tab return.
+     *
+     * **Main-thread requirement.** Lifecycle add/remove must run on the main
+     * thread. [purchase] is `suspend` and may be called from any dispatcher,
+     * so the install dispatches to [kotlinx.coroutines.Dispatchers.Main] via
+     * [scope].
+     *
+     * @param targetDeferred the deferred this watcher is bound to. When the
+     *   timer fires we only release the slot if the current
+     *   [pendingCheckoutDeferred] is the same instance — concurrent purchase
+     *   serialization (CheckoutInFlight) means this should always hold, but
+     *   the identity check defends against bizarre reentrancy bugs.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun installCustomTabDismissalWatcher(
+        lifecycleOwner: androidx.lifecycle.LifecycleOwner,
+        targetDeferred: CompletableDeferred<String>,
+    ) {
+        scope.scope.launch(Dispatchers.Main.immediate) {
+            var wasPaused = false
+            val observer = object : androidx.lifecycle.LifecycleEventObserver {
+                override fun onStateChanged(
+                    source: androidx.lifecycle.LifecycleOwner,
+                    event: androidx.lifecycle.Lifecycle.Event,
+                ) {
+                    when (event) {
+                        androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                            wasPaused = true
+                        }
+                        androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                            if (!wasPaused) return
+                            // One-shot: detach BEFORE scheduling the grace
+                            // window so a subsequent ON_PAUSE/ON_RESUME pair
+                            // doesn't queue a second poll.
+                            source.lifecycle.removeObserver(this)
+                            scope.scope.launch {
+                                kotlinx.coroutines.delay(CUSTOM_TAB_GRACE_MS)
+                                val stillArmed = synchronized(this@ZeroSettle) {
+                                    pendingCheckoutDeferred === targetDeferred &&
+                                        !targetDeferred.isCompleted
+                                }
+                                if (stillArmed) releasePendingCheckout()
+                            }
+                        }
+                        androidx.lifecycle.Lifecycle.Event.ON_DESTROY -> {
+                            // Drop our strong-reference closure capture if the
+                            // host Activity dies before we fire (config-change
+                            // kill, process death). Without this the observer
+                            // is a memory leak.
+                            source.lifecycle.removeObserver(this)
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+        }
+    }
+
+    /**
+     * Grace window between an `ON_RESUME` after a Custom Tab dismiss and the
+     * auto-cancel firing. Gives a deep-link intent a chance to land first
+     * (when checkout completed successfully). 500ms is empirically generous —
+     * the deep-link intent dispatch is fast.
+     */
+    private const val CUSTOM_TAB_GRACE_MS: Long = 500L
 
     // ─── Native Play Billing ───────────────────────────────────────────────
 
@@ -964,6 +1136,24 @@ public object ZeroSettle {
     internal fun armPendingPlayPurchaseForTesting(): CompletableDeferred<String> = synchronized(this) {
         check(pendingPlayPurchaseDeferred == null) { "pendingPlayPurchaseDeferred already armed" }
         CompletableDeferred<String>().also { pendingPlayPurchaseDeferred = it }
+    }
+
+    /**
+     * Test-only: arm [pendingCheckoutDeferred] with a fresh deferred and flip
+     * `_pendingCheckout` to `true`. Same shape as
+     * [armPendingPlayPurchaseForTesting] but for the web slot — lets tests
+     * drive [installCustomTabDismissalWatcher] and [releasePendingCheckout]
+     * without going through the full [purchase] flow (which requires a
+     * configured backend + working Custom Tab launch).
+     *
+     * Throws if a slot is already armed.
+     */
+    internal fun armPendingCheckoutForTesting(): CompletableDeferred<String> = synchronized(this) {
+        check(pendingCheckoutDeferred == null) { "pendingCheckoutDeferred already armed" }
+        CompletableDeferred<String>().also {
+            pendingCheckoutDeferred = it
+            _pendingCheckout.value = true
+        }
     }
 
     /** Test-only: the Play sync queue owned by the coordinator (requires `syncPlayPurchases = true`). */
