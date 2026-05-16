@@ -16,6 +16,8 @@ import android.widget.ImageButton
 import android.widget.ProgressBar
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
@@ -121,6 +123,21 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
             allowFileAccess = false
             allowContentAccess = false
             mediaPlaybackRequiresUserGesture = false
+        }
+
+        // Enable the W3C Payment Request API inside the WebView. Without this
+        // the Stripe ExpressCheckoutElement's `canMakePayment` probe returns
+        // `{googlePay: false}` even on devices with Google Pay set up, and the
+        // checkout page falls through to its "Set up Google Pay to continue"
+        // wallet-setup CTA — for wallets-only PMCs that's a blank-CTA dead
+        // end. Vanilla android.webkit.WebView disables Payment Request by
+        // default; androidx.webkit 1.14.0+ exposes a Compat shim to opt in.
+        // The intent <queries> required for the system to route the PAY
+        // intent to Google Pay live in core/src/main/AndroidManifest.xml.
+        // Reference:
+        // https://developers.google.com/pay/api/android/guides/recipes/using-android-webview
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.PAYMENT_REQUEST)) {
+            WebSettingsCompat.setPaymentRequestEnabled(webView.settings, true)
         }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

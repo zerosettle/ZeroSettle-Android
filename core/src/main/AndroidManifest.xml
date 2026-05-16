@@ -8,6 +8,22 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
         </intent>
+        <!--
+            Required for Payment Request API (Google Pay) inside ZeroSettleWebViewActivity's
+            WebView. Without these, WebSettingsCompat.setPaymentRequestEnabled() can be
+            flipped on but the WebView still cannot resolve Google Pay's payment handler
+            and the in-page Stripe ExpressCheckoutElement renders no wallet row.
+            Reference: https://developers.google.com/pay/api/android/guides/recipes/using-android-webview
+        -->
+        <intent>
+            <action android:name="org.chromium.intent.action.PAY" />
+        </intent>
+        <intent>
+            <action android:name="org.chromium.intent.action.IS_READY_TO_PAY" />
+        </intent>
+        <intent>
+            <action android:name="org.chromium.intent.action.UPDATE_PAYMENT_DETAILS" />
+        </intent>
     </queries>
 
     <application>
