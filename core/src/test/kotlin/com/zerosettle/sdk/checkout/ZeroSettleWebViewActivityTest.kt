@@ -229,6 +229,45 @@ class ZeroSettleWebViewActivityTest {
         assertThat(activity.isFinishing).isTrue()
     }
 
+    // ─── JS bridge tests ───────────────────────────────────────────────
+
+    @Test
+    fun addsZeroSettleAndroidJsBridge() {
+        // Without `window.ZeroSettleAndroid` the checkout page's
+        // `inNativeWebView` check (templates/checkout.html:920-924) is
+        // false and the page falls through to its full-page browser
+        // layout. Registering the JS bridge under exactly that name
+        // is what makes the page render the bottom-sheet-optimized
+        // native branch. Robolectric's ShadowWebView records
+        // addJavascriptInterface calls and exposes them via
+        // getJavascriptInterface(name).
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val webView = activity.webViewField()!!
+        val bridge = shadowOf(webView).getJavascriptInterface(ZeroSettleWebViewActivity.JS_BRIDGE_NAME)
+
+        assertThat(bridge).isNotNull()
+        assertThat(bridge).isInstanceOf(ZeroSettleWebViewActivity.CheckoutJsBridge::class.java)
+    }
+
+    @Test
+    fun jsBridge_onNativeMessage_doesNotThrowOnMalformedPayload() {
+        // Defensive: the page is the source of these payloads, but
+        // we must not crash the WebView render thread on a malformed
+        // JSON message. `onNativeMessage` swallows JSONException and
+        // logs an empty action.
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val bridge = ZeroSettleWebViewActivity.CheckoutJsBridge(activity)
+
+        // Well-formed payload — exercises the happy path.
+        bridge.onNativeMessage("""{"action":"buttonsReady"}""")
+        // Malformed JSON — must not throw.
+        bridge.onNativeMessage("not json {{{")
+        // Empty payload — must not throw.
+        bridge.onNativeMessage("")
+    }
+
     @Test
     fun usesSheetThemeFromManifest() {
         // Sanity check the manifest <-> code wiring: the activity's theme

@@ -12,6 +12,7 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -195,6 +196,23 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.PAYMENT_REQUEST)) {
             WebSettingsCompat.setPaymentRequestEnabled(webView.settings, true)
         }
+
+        // Expose `window.ZeroSettleAndroid` to the checkout page. Its mere
+        // presence flips the page's `inNativeWebView` detection (see
+        // templates/checkout.html:920-924) so the page renders the
+        // bottom-sheet-optimized native branch — the lean header
+        // adopters customize via CheckoutBranding — instead of the
+        // full-page browser fallback meant for desktop-Safari users.
+        //
+        // The bridge also receives structured messages from the page
+        // via [CheckoutJsBridge.onNativeMessage] (Android equivalent of
+        // iOS's `window.webkit.messageHandlers.*` pattern). Today this
+        // channel is informational only — the canonical success/cancel
+        // pathway is the deep-link URL interception in the
+        // WebViewClient below.
+        @Suppress("AddJavascriptInterface") // First-party page, controlled origin.
+        webView.addJavascriptInterface(CheckoutJsBridge(this), JS_BRIDGE_NAME)
+
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
@@ -368,8 +386,77 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    /**
+     * JS bridge exposed to the checkout page as `window.ZeroSettleAndroid`.
+     *
+     * Two purposes:
+     *   1. Its mere presence flips the page's `inNativeWebView` detection
+     *      (templates/checkout.html:920-924) so the page renders its
+     *      native branch (bottom-sheet-optimized layout with the lean
+     *      header adopters customize via CheckoutBranding on the
+     *      dashboard) instead of the full-page browser fallback.
+     *   2. Receives structured messages from the page via
+     *      [onNativeMessage]. The page posts these for richer UX
+     *      signals like `ready`, `buttonsReady`, `error`, `complete`
+     *      — the Android equivalent of iOS's
+     *      `window.webkit.messageHandlers.*` pattern.
+     *
+     * Success / cancel routing still flows through the deep-link
+     * callback URL interception (`zerosettle://checkout/return?…`) —
+     * that's the canonical path. The native-message channel is
+     * additive, primarily used today to signal `buttonsReady` so the
+     * SDK doesn't block waiting for payment-buttons-ready when there's
+     * no wallet available.
+     */
+    internal class CheckoutJsBridge(
+        @Suppress("unused") private val activity: ZeroSettleWebViewActivity,
+    ) {
+        /**
+         * Called from the page on its native-message channel. Payload
+         * is a JSON string; we parse defensively and never throw — a
+         * malformed payload must not crash the WebView render thread.
+         *
+         * **Threading.** `@JavascriptInterface` methods fire on a
+         * private WebView worker thread, NOT the main thread. Today we
+         * only log so no UI hop is needed; any future routing back into
+         * the activity must `activity.runOnUiThread { … }`.
+         */
+        @JavascriptInterface
+        public fun onNativeMessage(payload: String) {
+            val action = runCatching {
+                org.json.JSONObject(payload).optString("action", "")
+            }.getOrDefault("")
+            android.util.Log.i(
+                "ZeroSettleAndroid",
+                "onNativeMessage action=$action payload=${payload.take(MAX_LOG_PAYLOAD_CHARS)}",
+            )
+            // Future:
+            //   action == "ready"        → could dismiss our own loading spinner
+            //   action == "buttonsReady" → analytics breadcrumb
+            //   action == "error"        → could surface as Result.failure via the
+            //                              pending deferred (today the URL
+            //                              interception handles terminal states;
+            //                              the JS error channel is informational)
+            //   action == "complete"     → ignored; URL interception is canonical
+        }
+
+        private companion object {
+            private const val MAX_LOG_PAYLOAD_CHARS = 500
+        }
+    }
+
     public companion object {
         internal const val EXTRA_CHECKOUT_URL: String = "zs_checkout_url"
+
+        /**
+         * Name the [CheckoutJsBridge] is exposed under on the JavaScript
+         * global. Must stay in sync with the page's detection at
+         * `templates/checkout.html:920-924` (`window.ZeroSettleAndroid`)
+         * and the `postToNative` Android branch at
+         * `templates/checkout.html:2263-2267`.
+         */
+        internal const val JS_BRIDGE_NAME: String = "ZeroSettleAndroid"
+
         private const val MATCH_PARENT = FrameLayout.LayoutParams.MATCH_PARENT
         private const val SHEET_HEIGHT_RATIO = 0.88f
         private const val ANIM_DURATION_MS = 260L
