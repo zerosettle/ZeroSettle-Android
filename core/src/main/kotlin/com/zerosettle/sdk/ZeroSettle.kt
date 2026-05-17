@@ -366,13 +366,7 @@ public object ZeroSettle {
 
     // ─── Convenience accessors ──────────────────────────────────────────────
 
-    // Case-insensitive match: backend now treats `Product.reference_id` as
-    // case-insensitive (with a DB unique constraint), so the local catalog
-    // cache must do the same — otherwise a product stored as
-    // `io.zerosettle.justone.streakSaver1` won't be found when callers ask
-    // for `io.zerosettle.justone.streaksaver1`.
-    public fun product(referenceId: String): Product? =
-        _products.value.firstOrNull { it.id.equals(referenceId, ignoreCase = true) }
+    public fun product(referenceId: String): Product? = _products.value.firstOrNull { it.id == referenceId }
     public fun hasActiveEntitlement(productId: String): Boolean =
         _entitlements.value.any { it.productId == productId && it.isActive }
 
