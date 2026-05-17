@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Theme.ZeroSettleSheet — translucent, no-title-bar theme used by
+        ZeroSettleWebViewActivity to present web checkout as a bottom-anchored
+        sheet rather than a full-screen activity. The activity owns the
+        slide-up / slide-down + scrim-fade animations programmatically on the
+        inner views (see ZeroSettleWebViewActivity.kt) so we deliberately do
+        NOT set windowAnimationStyle here — a window-level animation slides
+        the scrim + sheet as one unit, which mismatches iOS Kit's sheet UX
+        where the dim background fades while the sheet slides.
+
+        Inheriting Theme.Translucent.NoTitleBar (platform, not AppCompat) keeps
+        :core free of AppCompat / Material dependencies per the SDK's stated
+        constraint. Status bar remains visible above the sheet because the
+        platform translucent theme doesn't claim the system UI surface.
+    -->
+    <style name="Theme.ZeroSettleSheet" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+</resources>

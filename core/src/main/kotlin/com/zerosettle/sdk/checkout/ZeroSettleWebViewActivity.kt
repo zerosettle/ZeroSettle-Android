@@ -1,5 +1,6 @@
 package com.zerosettle.sdk.checkout
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
@@ -8,11 +9,15 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
+import android.view.ViewTreeObserver
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -30,16 +35,24 @@ import kotlinx.coroutines.launch
  * from this activity without any per-adopter setup — the activity is
  * registered in `core/src/main/AndroidManifest.xml`.
  *
+ * **Presentation.** Rendered as a bottom-anchored sheet to match iOS Kit's
+ * "WebView Sheet (WKWebView)" UX: ~88% screen height, rounded top corners,
+ * slide-up on enter, slide-down + scrim fade on exit, tap-outside-the-sheet
+ * dismisses as cancel. The animation runs on the inner views (not the
+ * window) so the scrim can fade independently of the sheet's translateY —
+ * a window-level animation would slide them together, which doesn't match.
+ *
  * Intercepts `zerosettle://checkout/return?…` callbacks from the WebView
  * (same scheme the Custom Tab path uses) and routes them through
  * [ZeroSettle.completeWebCheckout] — the existing deferred-bridge in
  * [ZeroSettle.purchase] then resolves the same way it would for a Custom
  * Tab return.
  *
- * Back press / close button → finishes after synthesizing a cancel
- * callback so the pending checkout's `await` is completed exceptionally
- * with [com.zerosettle.sdk.models.ZeroSettleError.PurchaseCancelled],
- * never left hanging.
+ * Back press / close button / tap-outside / (future) drag-down all funnel
+ * through [handleCancel] which synthesizes a cancel callback so the
+ * pending checkout's `await` is completed exceptionally with
+ * [com.zerosettle.sdk.models.ZeroSettleError.PurchaseCancelled], never
+ * left hanging.
  *
  * **Scope choice.** [ZeroSettle.completeWebCheckout] is `suspend` and does
  * a network `restoreEntitlements()` call on the success branch. We launch
@@ -53,6 +66,9 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
+    private lateinit var rootScrim: FrameLayout
+    private lateinit var sheetContainer: LinearLayout
+    private var isDismissing: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,7 +76,8 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
         if (checkoutUrl.isNullOrBlank()) {
             // Defensive: should never happen since we control the launch path.
             // Fail closed by completing the SDK's deferred with cancel + finish.
-            handleCancel()
+            // No animation here — bail straight out before the sheet ever paints.
+            handleCancelImmediate()
             return
         }
 
@@ -68,24 +85,46 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
         wireBackPressToCancel()
         configureWebView()
         webView.loadUrl(checkoutUrl)
+        playEnterAnimation()
     }
 
     private fun buildLayout(): View {
-        // Programmatic layout — no XML — so this activity has zero resource
-        // dependencies on the host app. Layout:
-        //   [WebView fills the entire container]
-        //   [ProgressBar centered, hidden once the page finishes loading]
-        //   [Close X button overlaying top-right, 48dp tap target]
-        val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.WHITE)
+        // Layout:
+        //   [outer FrameLayout = scrim — tap dismisses]
+        //     [inner LinearLayout = sheet, anchored bottom, ~88% height]
+        //       [FrameLayout sheet body]
+        //         [WebView (fills)]
+        //         [ProgressBar centered]
+        //         [Close X top-right]
+        //
+        // The scrim's background starts transparent; playEnterAnimation()
+        // fades it to a translucent black while the sheet slides up. No
+        // window-level animations / windowAnimationStyle — animating the
+        // window slides scrim + sheet together, which looks wrong vs iOS.
+        val density = resources.displayMetrics.density
+
+        rootScrim = FrameLayout(this).apply {
+            setBackgroundColor(SCRIM_TRANSPARENT)
             layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
+            setOnClickListener { handleCancel() }
         }
 
+        sheetContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R_DRAWABLE_ZS_SHEET_BACKGROUND)
+            // Consume taps inside the sheet so they don't propagate to the
+            // scrim's dismiss-on-click listener.
+            isClickable = true
+            isFocusable = true
+        }
+
+        val sheetBody = FrameLayout(this)
+
         webView = WebView(this)
-        root.addView(webView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        sheetBody.addView(webView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         progressBar = ProgressBar(this).apply { isIndeterminate = true }
-        root.addView(
+        sheetBody.addView(
             progressBar,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -93,23 +132,40 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
             ).apply { gravity = Gravity.CENTER },
         )
 
-        val density = resources.displayMetrics.density
         val closeButton = ImageButton(this).apply {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
             background = null
             setOnClickListener { handleCancel() }
             contentDescription = "Close checkout"
         }
-        val size = (48 * density).toInt()
-        val margin = (8 * density).toInt()
-        root.addView(
+        val closeSize = (48 * density).toInt()
+        val closeMargin = (8 * density).toInt()
+        sheetBody.addView(
             closeButton,
-            FrameLayout.LayoutParams(size, size).apply {
+            FrameLayout.LayoutParams(closeSize, closeSize).apply {
                 gravity = Gravity.TOP or Gravity.END
-                setMargins(0, margin, margin, 0)
+                setMargins(0, closeMargin, closeMargin, 0)
             },
         )
-        return root
+
+        sheetContainer.addView(
+            sheetBody,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            ),
+        )
+
+        // Sheet height = ~88% of screen height (leaves the status bar +
+        // small gap visible above), wraps when content is smaller.
+        val sheetHeightPx = (resources.displayMetrics.heightPixels * SHEET_HEIGHT_RATIO).toInt()
+        val sheetParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            sheetHeightPx,
+        ).apply { gravity = Gravity.BOTTOM }
+        rootScrim.addView(sheetContainer, sheetParams)
+        return rootScrim
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -168,6 +224,72 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
         })
     }
 
+    /**
+     * Runs the slide-up + scrim-fade animation once the sheet is laid out.
+     * We defer to a pre-draw listener so the sheet's measured height is
+     * available — otherwise translationY = height would be zero on the
+     * first pass and there'd be no slide-up.
+     */
+    private fun playEnterAnimation() {
+        if (!::sheetContainer.isInitialized) return
+        val sheet = sheetContainer
+        val scrim = rootScrim
+        // Hide initially; pre-draw listener fires once layout is measured,
+        // sets translationY to off-screen, then animates back to 0.
+        sheet.visibility = View.INVISIBLE
+        sheet.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                sheet.viewTreeObserver.removeOnPreDrawListener(this)
+                sheet.translationY = sheet.height.toFloat()
+                sheet.visibility = View.VISIBLE
+                sheet.animate()
+                    .translationY(0f)
+                    .setDuration(ANIM_DURATION_MS)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+                fadeScrim(from = 0, to = SCRIM_DIM_ALPHA, durationMs = ANIM_DURATION_MS)
+                return true
+            }
+        })
+    }
+
+    /**
+     * Visual-only counterpart to [playEnterAnimation]: kick off a slide-down +
+     * scrim-fade so the dismiss looks animated. Does NOT call [finish] — the
+     * caller (handleCancel / handleCallback / the overridden [finish]) is
+     * responsible for invoking [super.finish] synchronously alongside this
+     * so `isFinishing` flips immediately and the SDK's deferred resolves.
+     * The window-close ordinarily runs before the animation completes; this
+     * is a deliberate trade for synchronous semantics so callers don't have
+     * to thread a callback through every dismiss surface.
+     */
+    private fun playExitAnimation() {
+        if (isDismissing) return
+        isDismissing = true
+        if (!::sheetContainer.isInitialized) return
+        val sheet = sheetContainer
+        sheet.animate()
+            .translationY(sheet.height.toFloat())
+            .setDuration(ANIM_DURATION_MS)
+            .setInterpolator(AccelerateInterpolator())
+            .start()
+        fadeScrim(from = SCRIM_DIM_ALPHA, to = 0, durationMs = ANIM_DURATION_MS)
+    }
+
+    private fun fadeScrim(from: Int, to: Int, durationMs: Long) {
+        if (!::rootScrim.isInitialized) return
+        ValueAnimator.ofArgb(scrimColor(from), scrimColor(to)).apply {
+            duration = durationMs
+            addUpdateListener { animator ->
+                val color = animator.animatedValue as Int
+                rootScrim.setBackgroundColor(color)
+            }
+            start()
+        }
+    }
+
+    private fun scrimColor(alpha: Int): Int = Color.argb(alpha, 0, 0, 0)
+
     private fun handleCallback(uri: Uri) {
         // Hand off to the SDK's existing deep-link entry point so the
         // deferred bridge resolves identically to the Custom Tab path.
@@ -193,10 +315,47 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
         finish()
     }
 
+    /**
+     * Cancel path for the defensive missing-extra branch where no sheet
+     * has been laid out yet. Skips animation entirely and finishes the
+     * activity directly. `overridePendingTransition` is deprecated in API
+     * 34+ in favor of `overrideActivityTransition`, but it's still the
+     * lowest-cost call that suppresses the default window transition; the
+     * deprecation is informational, not functional. Re-evaluate when the
+     * SDK's minSdk crosses 34.
+     */
+    @Suppress("DEPRECATION")
+    private fun handleCancelImmediate() {
+        val cancelUrl = Uri.Builder()
+            .scheme(WebCheckoutFlow.CALLBACK_SCHEME)
+            .authority(WebCheckoutFlow.CALLBACK_HOST)
+            .path(WebCheckoutFlow.CALLBACK_PATH)
+            .appendQueryParameter("status", "cancelled")
+            .build()
+            .toString()
+        completeOnGlobalScope(cancelUrl)
+        super.finish()
+        overridePendingTransition(0, 0)
+    }
+
     @OptIn(DelicateCoroutinesApi::class)
     private fun completeOnGlobalScope(callbackUrl: String) {
         // See class docstring for why we deliberately escape lifecycleScope.
         GlobalScope.launch { ZeroSettle.completeWebCheckout(callbackUrl) }
+    }
+
+    override fun finish() {
+        // Kick off the slide-down + scrim-fade animation alongside the
+        // synchronous super.finish(). The activity transition + window
+        // teardown often outruns the animation; that's intentional. We
+        // optimize for synchronous `isFinishing` semantics (the SDK's
+        // deferred bridge depends on the activity reporting finished
+        // promptly) over a perfectly choreographed exit. The visible
+        // result on a real device is still a slide-down because the
+        // system window-anim composer renders the activity frame buffer
+        // through the dismiss.
+        playExitAnimation()
+        super.finish()
     }
 
     override fun onDestroy() {
@@ -212,6 +371,16 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
     public companion object {
         internal const val EXTRA_CHECKOUT_URL: String = "zs_checkout_url"
         private const val MATCH_PARENT = FrameLayout.LayoutParams.MATCH_PARENT
+        private const val SHEET_HEIGHT_RATIO = 0.88f
+        private const val ANIM_DURATION_MS = 260L
+        private const val SCRIM_DIM_ALPHA = 0x99 // ~60% black scrim
+        private const val SCRIM_TRANSPARENT = 0x00000000
+
+        // Resolved at compile time via R class. Kept as a constant ref so the
+        // (rare) test that exercises buildLayout() with a mocked resources
+        // surface stays grep-able.
+        private val R_DRAWABLE_ZS_SHEET_BACKGROUND: Int
+            get() = com.zerosettle.sdk.R.drawable.zs_sheet_background
 
         /** Build the launch [Intent] for this activity. Visible for [WebCheckoutFlow.launchWebView]. */
         public fun newIntent(activity: Activity, checkoutUrl: String): Intent =

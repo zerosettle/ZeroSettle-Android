@@ -2,9 +2,13 @@ package com.zerosettle.sdk.checkout
 
 import android.content.Intent
 import android.net.Uri
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -18,7 +22,9 @@ import org.robolectric.android.controller.ActivityController
  * Unit tests for [ZeroSettleWebViewActivity].
  *
  * We exercise the contract the activity owns directly — URL load, callback
- * interception, defensive cancel, back-press behaviour, intent factory.
+ * interception, defensive cancel, back-press behaviour, intent factory, AND
+ * the bottom-sheet dismiss surfaces (scrim click + close button) introduced
+ * when the activity moved from full-screen to sheet presentation.
  * The SDK-side bridge resolution ([com.zerosettle.sdk.ZeroSettle.completeWebCheckout])
  * is covered by `ZeroSettleWebPurchaseTest`; here we just assert that the
  * activity calls into it through the [WebCheckoutFlow.parseCallback]-compatible
@@ -43,6 +49,18 @@ class ZeroSettleWebViewActivityTest {
         val f = ZeroSettleWebViewActivity::class.java.getDeclaredField("webView")
         f.isAccessible = true
         return f.get(this) as? WebView
+    }
+
+    private fun ZeroSettleWebViewActivity.scrimRootField(): FrameLayout? {
+        val f = ZeroSettleWebViewActivity::class.java.getDeclaredField("rootScrim")
+        f.isAccessible = true
+        return f.get(this) as? FrameLayout
+    }
+
+    private fun ZeroSettleWebViewActivity.sheetContainerField(): LinearLayout? {
+        val f = ZeroSettleWebViewActivity::class.java.getDeclaredField("sheetContainer")
+        f.isAccessible = true
+        return f.get(this) as? LinearLayout
     }
 
     private fun WebView.client(): WebViewClient = shadowOf(this).webViewClient
@@ -153,6 +171,77 @@ class ZeroSettleWebViewActivityTest {
             .isEqualTo("https://checkout.example/xyz")
     }
 
+    // ─── bottom-sheet structural tests ─────────────────────────────────
+
+    @Test
+    fun sheetLayout_webViewIsHostedInsideInnerSheetContainer() {
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val webView = activity.webViewField()!!
+        val sheet = activity.sheetContainerField()!!
+        val scrim = activity.scrimRootField()!!
+
+        // WebView is somewhere inside the sheet container (sheet → body → webView)…
+        assertThat(viewContains(sheet, webView)).isTrue()
+        // …but the sheet itself is a child of the scrim, not the WebView's direct parent.
+        assertThat(scrim.indexOfChild(sheet)).isAtLeast(0)
+    }
+
+    @Test
+    fun scrimClick_callsHandleCancelAndFinishes() {
+        // Outer scrim click = tap-outside-the-sheet → cancel pathway → finish().
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val scrim = activity.scrimRootField()!!
+
+        scrim.performClick()
+
+        assertThat(activity.isFinishing).isTrue()
+    }
+
+    @Test
+    fun sheetClick_doesNotDismiss() {
+        // Tapping inside the sheet must NOT dismiss — the sheet consumes
+        // the click. Without isClickable on the sheet container the tap
+        // would propagate up to the scrim's listener.
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val sheet = activity.sheetContainerField()!!
+
+        // Verify clickable + perform a click; activity must not finish.
+        assertThat(sheet.isClickable).isTrue()
+        sheet.performClick()
+
+        assertThat(activity.isFinishing).isFalse()
+    }
+
+    @Test
+    fun closeButton_stillTriggersCancel() {
+        // Locate the close ImageButton inside the sheet body and tap it.
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val sheet = activity.sheetContainerField()!!
+
+        val closeButton = findCloseButton(sheet)
+        assertThat(closeButton).isNotNull()
+        closeButton!!.performClick()
+
+        assertThat(activity.isFinishing).isTrue()
+    }
+
+    @Test
+    fun usesSheetThemeFromManifest() {
+        // Sanity check the manifest <-> code wiring: the activity's theme
+        // entry from PackageManager must resolve to Theme.ZeroSettleSheet.
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val info = ctx.packageManager.getActivityInfo(
+            android.content.ComponentName(ctx, ZeroSettleWebViewActivity::class.java),
+            0,
+        )
+        // Theme resource id should equal R.style.Theme_ZeroSettleSheet.
+        assertThat(info.themeResource).isEqualTo(com.zerosettle.sdk.R.style.Theme_ZeroSettleSheet)
+    }
+
     // ─── helpers ───────────────────────────────────────────────────────
 
     private fun stubRequest(url: String): WebResourceRequest = object : WebResourceRequest {
@@ -162,5 +251,26 @@ class ZeroSettleWebViewActivityTest {
         override fun hasGesture(): Boolean = false
         override fun getMethod(): String = "GET"
         override fun getRequestHeaders(): MutableMap<String, String> = mutableMapOf()
+    }
+
+    private fun viewContains(parent: ViewGroup, target: View): Boolean {
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChildAt(i)
+            if (child === target) return true
+            if (child is ViewGroup && viewContains(child, target)) return true
+        }
+        return false
+    }
+
+    private fun findCloseButton(parent: ViewGroup): android.widget.ImageButton? {
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChildAt(i)
+            if (child is android.widget.ImageButton) return child
+            if (child is ViewGroup) {
+                val found = findCloseButton(child)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 }
