@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Drag-handle pill for the top of ZeroSettleWebViewActivity's bottom sheet.
+    36dp wide × 4dp tall light-grey pill, rendered above the WebView in the
+    transparent sheetHeader. Matches iOS Kit's SwiftUI .sheet drag-handle UX:
+    gives adopters a clear visual cue for where the sheet content begins so
+    the WebView's page content doesn't render flush against the sheet edge.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFCCCCCC" />
+    <corners android:radius="2dp" />
+</shape>

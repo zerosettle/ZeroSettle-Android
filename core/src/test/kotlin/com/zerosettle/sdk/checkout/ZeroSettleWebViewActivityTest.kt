@@ -217,7 +217,10 @@ class ZeroSettleWebViewActivityTest {
 
     @Test
     fun closeButton_stillTriggersCancel() {
-        // Locate the close ImageButton inside the sheet body and tap it.
+        // Locate the close ImageButton inside the sheet header and tap it.
+        // The button moved from the WebView's top-right corner into the
+        // sheetHeader bar when we restructured for a visible drag handle,
+        // but the click handler still routes to handleCancel().
         val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
         val activity = controller.get()
         val sheet = activity.sheetContainerField()!!
@@ -227,6 +230,56 @@ class ZeroSettleWebViewActivityTest {
         closeButton!!.performClick()
 
         assertThat(activity.isFinishing).isTrue()
+    }
+
+    @Test
+    fun sheetLayout_headerSitsAboveWebViewBody() {
+        // After the structural refactor the sheetContainer is laid out as:
+        //   child 0: sheetHeader (FrameLayout, fixed height)
+        //   child 1: sheetBody   (FrameLayout, weight=1, hosts WebView)
+        // The WebView lives inside child 1 — NOT child 0. This guarantees
+        // the rounded-corner region of the sheet's background drawable is
+        // occupied by the transparent header (where the white drawable
+        // shows through) instead of by the WebView's opaque page content.
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val sheet = activity.sheetContainerField()!!
+        val webView = activity.webViewField()!!
+
+        assertThat(sheet.childCount).isEqualTo(2)
+        val header = sheet.getChildAt(0) as FrameLayout
+        val body = sheet.getChildAt(1) as FrameLayout
+        // Header does NOT contain the WebView; body does.
+        assertThat(viewContains(header, webView)).isFalse()
+        assertThat(viewContains(body, webView)).isTrue()
+    }
+
+    @Test
+    fun sheetHeader_containsDragHandleAndCloseButton() {
+        // The header must hold both the visual drag-handle pill and the
+        // close X. The drag handle is a plain View (no class to assert
+        // on directly), so we identify it as "not the close button" —
+        // i.e., the header has at least one non-ImageButton child sized
+        // smaller than the header itself, with the configured drawable
+        // background. Verifying childCount == 2 + types is enough.
+        val controller = launch { putExtra(ZeroSettleWebViewActivity.EXTRA_CHECKOUT_URL, "https://checkout.example/abc") }
+        val activity = controller.get()
+        val sheet = activity.sheetContainerField()!!
+        val header = sheet.getChildAt(0) as FrameLayout
+
+        // One drag-handle View + one close ImageButton.
+        assertThat(header.childCount).isEqualTo(2)
+        val close = findCloseButton(header)
+        assertThat(close).isNotNull()
+        // The other child is the drag handle (a plain View, NOT an
+        // ImageButton). Find it positionally.
+        val dragHandle = (0 until header.childCount)
+            .map { header.getChildAt(it) }
+            .firstOrNull { it !is android.widget.ImageButton }
+        assertThat(dragHandle).isNotNull()
+        // Drag handle is a bare View (not a ViewGroup, not an ImageButton).
+        assertThat(dragHandle).isNotInstanceOf(android.widget.ImageButton::class.java)
+        assertThat(dragHandle).isNotInstanceOf(ViewGroup::class.java)
     }
 
     // ─── JS bridge tests ───────────────────────────────────────────────

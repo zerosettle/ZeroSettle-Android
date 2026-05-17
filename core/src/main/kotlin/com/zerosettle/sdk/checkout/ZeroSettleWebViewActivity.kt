@@ -92,11 +92,20 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
     private fun buildLayout(): View {
         // Layout:
         //   [outer FrameLayout = scrim — tap dismisses]
-        //     [inner LinearLayout = sheet, anchored bottom, ~88% height]
-        //       [FrameLayout sheet body]
+        //     [inner LinearLayout = sheet, anchored bottom, ~88% height,
+        //      background = white rounded-top drawable]
+        //       [FrameLayout sheetHeader, 44dp tall, transparent]
+        //         [View dragHandle (36dp × 4dp grey pill, top-centered)]
+        //         [ImageButton closeButton (end-anchored, vertically centered)]
+        //       [FrameLayout sheetBody, weight=1]
         //         [WebView (fills)]
         //         [ProgressBar centered]
-        //         [Close X top-right]
+        //
+        // The header sits ABOVE the WebView so the sheet's white rounded-top
+        // drawable shows around the drag handle / close X — the WebView no
+        // longer occupies the rounded-corner region, so its inner page CSS
+        // can't paint over the corners. No clipToOutline / outline provider
+        // needed; the structural split is the fix.
         //
         // The scrim's background starts transparent; playEnterAnimation()
         // fades it to a translucent black while the sheet slides up. No
@@ -119,6 +128,51 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
             isFocusable = true
         }
 
+        // ── Sheet header: drag handle pill + close X ─────────────────────
+        // Transparent background so the sheet's white rounded-top drawable
+        // shows through at the corners.
+        val sheetHeader = FrameLayout(this)
+
+        val dragHandle = View(this).apply {
+            setBackgroundResource(R_DRAWABLE_ZS_SHEET_DRAG_HANDLE)
+        }
+        val dragHandleWidthPx = (DRAG_HANDLE_WIDTH_DP * density).toInt()
+        val dragHandleHeightPx = (DRAG_HANDLE_HEIGHT_DP * density).toInt()
+        val dragHandleTopMarginPx = (DRAG_HANDLE_TOP_MARGIN_DP * density).toInt()
+        sheetHeader.addView(
+            dragHandle,
+            FrameLayout.LayoutParams(dragHandleWidthPx, dragHandleHeightPx).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                topMargin = dragHandleTopMarginPx
+            },
+        )
+
+        val closeButton = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            background = null
+            setOnClickListener { handleCancel() }
+            contentDescription = "Close checkout"
+        }
+        val closeSizePx = (CLOSE_BUTTON_SIZE_DP * density).toInt()
+        val closeEndMarginPx = (CLOSE_BUTTON_END_MARGIN_DP * density).toInt()
+        sheetHeader.addView(
+            closeButton,
+            FrameLayout.LayoutParams(closeSizePx, closeSizePx).apply {
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                marginEnd = closeEndMarginPx
+            },
+        )
+
+        val sheetHeaderHeightPx = (SHEET_HEADER_HEIGHT_DP * density).toInt()
+        sheetContainer.addView(
+            sheetHeader,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                sheetHeaderHeightPx,
+            ),
+        )
+
+        // ── Sheet body: WebView + centered progress spinner ──────────────
         val sheetBody = FrameLayout(this)
 
         webView = WebView(this)
@@ -131,22 +185,6 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
             ).apply { gravity = Gravity.CENTER },
-        )
-
-        val closeButton = ImageButton(this).apply {
-            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-            background = null
-            setOnClickListener { handleCancel() }
-            contentDescription = "Close checkout"
-        }
-        val closeSize = (48 * density).toInt()
-        val closeMargin = (8 * density).toInt()
-        sheetBody.addView(
-            closeButton,
-            FrameLayout.LayoutParams(closeSize, closeSize).apply {
-                gravity = Gravity.TOP or Gravity.END
-                setMargins(0, closeMargin, closeMargin, 0)
-            },
         )
 
         sheetContainer.addView(
@@ -463,11 +501,27 @@ public class ZeroSettleWebViewActivity : ComponentActivity() {
         private const val SCRIM_DIM_ALPHA = 0x99 // ~60% black scrim
         private const val SCRIM_TRANSPARENT = 0x00000000
 
+        // Sheet header (drag handle + close button) dimensions. The header
+        // bar sits above the WebView so the sheet's white rounded-top
+        // drawable shows around the drag handle / close X — matches iOS
+        // Kit's SwiftUI .sheet UX. Tweak SHEET_HEADER_HEIGHT_DP if the
+        // close button feels cramped; the header steals from the WebView's
+        // weight=1 region so SHEET_HEIGHT_RATIO does not need to change.
+        private const val SHEET_HEADER_HEIGHT_DP = 44
+        private const val DRAG_HANDLE_WIDTH_DP = 36
+        private const val DRAG_HANDLE_HEIGHT_DP = 4
+        private const val DRAG_HANDLE_TOP_MARGIN_DP = 8
+        private const val CLOSE_BUTTON_SIZE_DP = 36
+        private const val CLOSE_BUTTON_END_MARGIN_DP = 8
+
         // Resolved at compile time via R class. Kept as a constant ref so the
         // (rare) test that exercises buildLayout() with a mocked resources
         // surface stays grep-able.
         private val R_DRAWABLE_ZS_SHEET_BACKGROUND: Int
             get() = com.zerosettle.sdk.R.drawable.zs_sheet_background
+
+        private val R_DRAWABLE_ZS_SHEET_DRAG_HANDLE: Int
+            get() = com.zerosettle.sdk.R.drawable.zs_sheet_drag_handle
 
         /** Build the launch [Intent] for this activity. Visible for [WebCheckoutFlow.launchWebView]. */
         public fun newIntent(activity: Activity, checkoutUrl: String): Intent =
