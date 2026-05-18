@@ -92,6 +92,8 @@ class ZeroSettleUcbIntegrationTest {
         assertThat(cached).isNotNull()
         assertThat(cached!!.isEnabled).isTrue()
         assertThat(cached.logoBannerUrl).isEqualTo("https://cdn.example.com/b.png")
+        // Public accessor must mirror the repository's isEnabled value.
+        assertThat(ZeroSettle.isUcbEnabled.value).isTrue()
     }
 
     @Test fun bootstrap_ucbConfigEndpoint404_leavesConfigDisabled_andStillSucceeds() = runTest {
@@ -113,6 +115,8 @@ class ZeroSettleUcbIntegrationTest {
         assertThat(ZeroSettle.isBootstrapped.value).isTrue()
         assertThat(ZeroSettle.playCoordinator).isNotNull()
         assertThat(ZeroSettle.ucbConfigRepository?.config?.value).isEqualTo(UcbConfig.Disabled)
+        // Public accessor must reflect the disabled state.
+        assertThat(ZeroSettle.isUcbEnabled.value).isFalse()
     }
 
     @Test fun bootstrap_ucbConfigEndpoint5xx_leavesConfigDisabled_andStillSucceeds() = runTest {
@@ -131,5 +135,32 @@ class ZeroSettleUcbIntegrationTest {
 
         assertThat(res.isSuccess).isTrue()
         assertThat(ZeroSettle.ucbConfigRepository?.config?.value).isEqualTo(UcbConfig.Disabled)
+        assertThat(ZeroSettle.isUcbEnabled.value).isFalse()
+    }
+
+    @Test fun isUcbEnabled_isFalse_immediatelyAfterConfigure_beforeBootstrap() = runTest {
+        // Before identify() / bootstrap() runs, isUcbEnabled must default to false.
+        configure()
+        assertThat(ZeroSettle.isUcbEnabled.value).isFalse()
+    }
+
+    @Test fun configure_resetsIsUcbEnabled_afterPriorBootstrap() = runTest {
+        // Bootstrap with UCB enabled, then re-configure — the public accessor
+        // must reset to false for the new tenant before bootstrap re-runs.
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            "/v1/iap/play-billing-config/" to { MockResponse().setBody(
+                """{"is_enabled":true,"dma_alt_billing_only_eea":false,"logo_banner_url":"","subscription_management_urls":{}}""",
+            ) },
+        ))
+
+        configure()
+        ZeroSettle.identify(Identity.User(id = "u1"))
+        assertThat(ZeroSettle.isUcbEnabled.value).isTrue()
+
+        // Re-configure resets to false without waiting for a new identify().
+        configure()
+        assertThat(ZeroSettle.isUcbEnabled.value).isFalse()
     }
 }

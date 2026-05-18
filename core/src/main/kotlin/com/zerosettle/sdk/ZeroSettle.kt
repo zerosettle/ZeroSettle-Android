@@ -102,6 +102,7 @@ public object ZeroSettle {
         entitlementPoller?.stop()
         entitlementPoller = null
         ucbConfigRepository = null
+        _isUcbEnabled.value = false
         this.appContext = context.applicationContext
         this.config = config
         this.identityStore = IdentityStore(context.applicationContext)
@@ -308,6 +309,7 @@ public object ZeroSettle {
                 "config fetch failed: ${it.message}; defaulting to disabled",
             )
         }
+        _isUcbEnabled.value = ucbConfigRepository?.config?.value?.isEnabled ?: false
 
         // Rebuild the coordinator so the fresh UCB config takes effect.
         // The one configure() built was constructed against the repo's
@@ -408,6 +410,23 @@ public object ZeroSettle {
     }
 
     // ─── Observables ────────────────────────────────────────────────────────
+
+    /**
+     * Whether User Choice Billing (UCB) is enabled for this app/market, as
+     * determined by the server-side `PlayBillingConfig` fetched at bootstrap.
+     *
+     * When `true`, host apps should present a **single unified purchase entry
+     * point** — Google's choice screen handles routing between web checkout and
+     * Play Billing. When `false` (the default before bootstrap completes, and
+     * for apps that have not opted into UCB), apps may show separate web and
+     * Play purchase paths.
+     *
+     * Reflects the server's `PlayBillingConfig.is_enabled` field. Starts
+     * `false`, updates once after [identify] completes bootstrap, and resets
+     * to `false` on [configure] (new tenant/key).
+     */
+    private val _isUcbEnabled = MutableStateFlow(false)
+    public val isUcbEnabled: StateFlow<Boolean> = _isUcbEnabled.asStateFlow()
 
     private val _products = MutableStateFlow<List<Product>>(emptyList())
     public val products: StateFlow<List<Product>> = _products.asStateFlow()
