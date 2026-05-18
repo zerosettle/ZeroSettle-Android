@@ -26,7 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import io.zerosettle.justone.OfferHolder
+import io.zerosettle.justone.sdk.OfferHolder
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.models.Price
 import com.zerosettle.ui.ZeroSettleCheckoutHost

@@ -23,7 +23,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.zerosettle.justone.OfferHolder
+import io.zerosettle.justone.sdk.OfferHolder
 import com.zerosettle.ui.ZeroSettleCheckoutHost
 import com.zerosettle.ui.ZeroSettleOfferTip
 import kotlinx.coroutines.launch

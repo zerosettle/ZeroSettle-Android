@@ -30,7 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import io.zerosettle.justone.OfferHolder
+import io.zerosettle.justone.sdk.OfferHolder
 import io.zerosettle.justone.SampleConfig
 import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.launch

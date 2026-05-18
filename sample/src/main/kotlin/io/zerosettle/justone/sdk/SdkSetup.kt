@@ -1,6 +1,7 @@
-package io.zerosettle.justone
+package io.zerosettle.justone.sdk
 
 import android.content.Context
+import io.zerosettle.justone.SampleConfig
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.ZeroSettleConfig
 
@@ -20,6 +21,7 @@ internal fun configureSdk(ctx: Context) {
             publishableKey = SampleConfig.PUBLISHABLE_KEY,
             baseUrlOverride = SampleConfig.resolveBaseUrlOverride(ctx),
             syncPlayPurchases = true,
+            preloadCheckout = true,
         ),
     )
 }

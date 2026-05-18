@@ -27,9 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.zerosettle.justone.OfferHolder
 import io.zerosettle.justone.SampleConfig
-import io.zerosettle.justone.configureSdk
+import io.zerosettle.justone.sdk.OfferHolder
+import io.zerosettle.justone.sdk.configureSdk
 import com.zerosettle.sdk.Identity
 import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.launch

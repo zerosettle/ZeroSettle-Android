@@ -1,6 +1,7 @@
 package io.zerosettle.justone
 
 import android.app.Application
+import io.zerosettle.justone.sdk.configureSdk
 
 class SampleApplication : Application() {
     override fun onCreate() {
