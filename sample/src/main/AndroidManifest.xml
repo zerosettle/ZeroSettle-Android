@@ -14,7 +14,7 @@
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
-            android:name=".SampleActivity"
+            android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
@@ -29,5 +29,11 @@
                 <data android:scheme="zerosettle" android:host="checkout" />
             </intent-filter>
         </activity>
+        <!-- Pre-rewrite debug harness Activity. No longer the launcher; kept
+             declared until the Phase 4 cutover, then deleted. -->
+        <activity
+            android:name=".SampleActivity"
+            android:exported="false"
+            android:launchMode="singleTop" />
     </application>
 </manifest>
