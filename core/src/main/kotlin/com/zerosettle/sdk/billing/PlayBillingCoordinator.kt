@@ -14,9 +14,28 @@ import com.zerosettle.sdk.core.ZeroSettleEvent
 import com.zerosettle.sdk.core.ZeroSettleLogger
 import com.zerosettle.sdk.models.PendingClaim
 import com.zerosettle.sdk.models.Product
+import com.zerosettle.sdk.models.ProductType
 import com.zerosettle.sdk.models.ZeroSettleError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+
+/**
+ * Map a canonical [Product] to the [BillingClient.ProductType] string Play
+ * expects when querying product details / launching the billing flow.
+ *
+ * Only `AUTO_RENEWABLE_SUBSCRIPTION` maps to `SUBS`; everything else
+ * (consumables, non-consumables, non-renewing subscriptions) is `INAPP` on
+ * Play. Centralising the mapping prevents the recurrence of the SUBS-default
+ * bug where one-time products were silently queried as subscriptions and
+ * returned an empty result (surfaced to the caller as `ProductNotFound`).
+ */
+internal fun playBillingProductType(product: Product): String = when (product.type) {
+    ProductType.AUTO_RENEWABLE_SUBSCRIPTION -> BillingClient.ProductType.SUBS
+    ProductType.NON_RENEWING_SUBSCRIPTION,
+    ProductType.CONSUMABLE,
+    ProductType.NON_CONSUMABLE,
+    -> BillingClient.ProductType.INAPP
+}
 
 /**
  * Glue between [ZeroSettle][com.zerosettle.sdk.ZeroSettle] and the Play Billing layer.
@@ -84,9 +103,16 @@ internal class PlayBillingCoordinator(
     /** Native Play Billing purchase: query details → launch flow. The result is delivered via [handlePurchases]. */
     suspend fun purchaseViaPlayBilling(activity: Activity, product: Product): Result<Unit> {
         val playProductId = product.playProductId ?: product.id
-        val details = billing.queryProductDetails(listOf(playProductId)).getOrElse { return Result.failure(it) }
-            .firstOrNull() ?: return Result.failure(ZeroSettleError.ProductNotFound(playProductId))
-        return billing.launchBillingFlow(activity, details)
+        val billingProductType = playBillingProductType(product)
+        android.util.Log.w("ZS-debug", "queryProductDetails(playProductId=$playProductId, productType=$billingProductType)")
+        val detailsResult = billing.queryProductDetails(listOf(playProductId), billingProductType)
+        detailsResult.onFailure { ex ->
+            android.util.Log.w("ZS-debug", "queryProductDetails FAILED: ${ex.javaClass.simpleName}: ${ex.message}")
+        }
+        val details = detailsResult.getOrElse { return Result.failure(it) }
+        android.util.Log.w("ZS-debug", "queryProductDetails returned ${details.size} item(s)")
+        val match = details.firstOrNull() ?: return Result.failure(ZeroSettleError.ProductNotFound(playProductId))
+        return billing.launchBillingFlow(activity, match)
     }
 
     private suspend fun handlePurchases(purchases: List<Purchase>) {

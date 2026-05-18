@@ -73,7 +73,7 @@ public class PlayBillingManager(
 
     public suspend fun queryProductDetails(
         productIds: List<String>,
-        productType: String = BillingClient.ProductType.SUBS,
+        productType: String,
     ): Result<List<ProductDetails>> {
         ensureConnected().getOrElse { return Result.failure(it) }
         val params = QueryProductDetailsParams.newBuilder().setProductList(
