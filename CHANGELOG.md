@@ -1,8 +1,23 @@
 # Changelog
 
-## v2.0.0 — JustOne sample app — 2026-05-18
+## v2.0.0 — JustOne sample app + UCB SDK fixes — 2026-05-18
 
-### Sample app (`:sample` module only — no SDK API changes)
+### SDK (`:core`)
+
+- **Bug fix — `purchaseViaPlayBilling()` cancel-hang:** Previously, dismissing the Google
+  choice screen or cancelling the Play billing sheet left the pending purchase deferred
+  unresolved, causing the call to hang indefinitely. Terminal billing-listener results are
+  now handled: `USER_CANCELED` resolves the deferred with
+  `Result.failure(ZeroSettleError.PurchaseCancelled)`; other non-OK result codes resolve
+  with `Result.failure(ZeroSettleError.PlayBillingError)`; `OK`+empty purchases list also
+  resolves as `PurchaseCancelled` (user dismissed before completing).
+- **New public API — `ZeroSettle.isUcbEnabled: StateFlow<Boolean>`:** Exposes whether
+  Google User Choice Billing is active for the current app and market, reflecting the
+  server `PlayBillingConfig`. Tenant- and market-scoped: reset on `configure()`, not on
+  `logout()`. Host apps can collect this flow to adapt their purchase UI (see the sample's
+  `DualPriceButtons` for a reference implementation).
+
+### Sample app (`:sample` module)
 
 The `:sample` module has been rebuilt from a 7-tab SDK debug harness into **JustOne**,
 a functional habit-tracker reference app (~24 Compose screens) demonstrating a realistic
@@ -17,7 +32,8 @@ pure `HabitCalc` functions (unit-tested via `HabitCalcTest` — 9 methods).
 **SDK surfaces exercised:**
 - *Identity* — `identify()`, `logout()`, `currentUserId`
 - *Catalog* — `products()`, `product()`
-- *Purchase* — `purchase()` (web checkout / Custom Tab), `purchaseViaPlayBilling()`
+- *Purchase* — `purchase()` (web checkout / Custom Tab), `purchaseViaPlayBilling()`,
+  `isUcbEnabled` (UCB-aware buy widget — see `DualPriceButtons` below)
 - *Entitlements* — `entitlements`, `hasActiveEntitlement()`, `restoreEntitlements()`
 - *Subscription management* — `cancelSubscription()`, `pauseSubscription()`,
   `resumeSubscription()`, `acceptSaveOffer()`, `fetchCancelFlowConfig()`
@@ -31,6 +47,12 @@ pure `HabitCalc` functions (unit-tested via `HabitCalcTest` — 9 methods).
 `trackEvent`, `CheckoutSheet.warmUp`/`warmUpAll` (substituted by the `preloadCheckout`
 config flag), `isWebCheckoutEnabled`, `newConsumableEntitlements`, `entitlementUpdates`,
 `submitCancelFlowResponse`.
+
+**UCB-aware buy widget (`DualPriceButtons`):** The paywall's buy widget adapts at runtime
+based on `ZeroSettle.isUcbEnabled`. When UCB is enabled, it renders a single unified
+"Buy" button that calls `purchaseViaPlayBilling()` — Google's system choice screen then
+routes the purchase to web checkout or Google Play. When UCB is disabled (the default for
+most apps/markets), it falls back to the two-button web / Google Play layout.
 
 ---
 
