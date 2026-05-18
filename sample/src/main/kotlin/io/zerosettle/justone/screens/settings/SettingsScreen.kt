@@ -25,6 +25,7 @@ fun SettingsScreen(
     onOpenShop: () -> Unit,
     onOpenCancel: (String) -> Unit,
     onOpenDeveloper: () -> Unit,
+    onShowUpsell: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -52,7 +53,11 @@ fun SettingsScreen(
                 AccountCard(onSignedOut = onSignedOut)
             }
 
-            // SubscriptionCard — Task 27
+            item {
+                SubscriptionCard(onCancel = onOpenCancel, onUpgrade = onShowUpsell)
+            }
+
+
 
             // StreakSaverCard — Task 28
 

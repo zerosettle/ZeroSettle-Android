@@ -72,6 +72,7 @@ fun JustOneNav(nav: NavHostController, startDestination: String) {
                 onOpenShop = { nav.navigate(Routes.CONSUMABLE_SHOP) },
                 onOpenCancel = { productId -> nav.navigate(Routes.cancelFlow(productId)) },
                 onOpenDeveloper = { nav.navigate(Routes.DEVELOPER) },
+                onShowUpsell = { nav.navigate(Routes.PREMIUM_UPSELL) },
             )
         }
         composable(Routes.CONSUMABLE_SHOP) { Text(Routes.CONSUMABLE_SHOP) }
