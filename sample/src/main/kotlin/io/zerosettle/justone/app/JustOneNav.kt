@@ -12,6 +12,7 @@ import io.zerosettle.justone.screens.habit.AddHabitScreen
 import io.zerosettle.justone.screens.habit.HabitDetailScreen
 import io.zerosettle.justone.screens.home.HomeScreen
 import io.zerosettle.justone.screens.paywall.LaunchPaywallScreen
+import io.zerosettle.justone.screens.paywall.PremiumUpsellSheet
 
 object Routes {
     const val CREATE_USER = "create-user"
@@ -58,7 +59,9 @@ fun JustOneNav(nav: NavHostController, startDestination: String) {
         composable(Routes.LAUNCH_PAYWALL) {
             LaunchPaywallScreen(onDone = { nav.popBackStack() })
         }
-        composable(Routes.PREMIUM_UPSELL) { Text(Routes.PREMIUM_UPSELL) }
+        composable(Routes.PREMIUM_UPSELL) {
+            PremiumUpsellSheet(onDismiss = { nav.popBackStack() })
+        }
         composable(Routes.SETTINGS) { Text(Routes.SETTINGS) }
         composable(Routes.CONSUMABLE_SHOP) { Text(Routes.CONSUMABLE_SHOP) }
         composable(
