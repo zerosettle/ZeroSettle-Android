@@ -14,6 +14,7 @@ import io.zerosettle.justone.screens.home.HomeScreen
 import io.zerosettle.justone.screens.paywall.LaunchPaywallScreen
 import io.zerosettle.justone.screens.paywall.PremiumUpsellSheet
 import io.zerosettle.justone.screens.settings.SettingsScreen
+import io.zerosettle.justone.screens.shop.ConsumableShopScreen
 
 object Routes {
     const val CREATE_USER = "create-user"
@@ -75,7 +76,9 @@ fun JustOneNav(nav: NavHostController, startDestination: String) {
                 onShowUpsell = { nav.navigate(Routes.PREMIUM_UPSELL) },
             )
         }
-        composable(Routes.CONSUMABLE_SHOP) { Text(Routes.CONSUMABLE_SHOP) }
+        composable(Routes.CONSUMABLE_SHOP) {
+            ConsumableShopScreen(onBack = { nav.popBackStack() })
+        }
         composable(
             Routes.CANCEL_FLOW,
             arguments = listOf(navArgument("productId") { type = NavType.StringType }),
