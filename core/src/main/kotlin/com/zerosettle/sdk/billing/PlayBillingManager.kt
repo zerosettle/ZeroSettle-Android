@@ -14,6 +14,7 @@ import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import com.android.billingclient.api.UserChoiceBillingListener
 import com.android.billingclient.api.acknowledgePurchase
 import com.android.billingclient.api.consumePurchase
 import com.android.billingclient.api.queryProductDetails
@@ -40,6 +41,12 @@ public class PlayBillingManager(
     private val obfuscatedAccountIdProvider: () -> String?,
     private val onPurchases: (List<Purchase>) -> Unit,
     private val logger: ZeroSettleLogger,
+    // UCB enablement (Phase 2 Chunk B). Defaults preserve binary/source
+    // compatibility for existing call sites — when [UcbConfig.isEnabled] is
+    // false (the default), the BillingClient builder is identical to the
+    // pre-UCB path. See [PlayBillingCoordinator] for the wiring decisions.
+    ucbConfig: UcbConfig = UcbConfig.Disabled,
+    ucbChoiceListener: UserChoiceBillingListener? = null,
 ) {
     private val app = context.applicationContext
 
@@ -51,10 +58,33 @@ public class PlayBillingManager(
         }
     }
 
-    private val client: BillingClient = BillingClient.newBuilder(app)
-        .setListener(purchasesListener)
-        .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
-        .build()
+    private val client: BillingClient = run {
+        val builder = BillingClient.newBuilder(app)
+            .setListener(purchasesListener)
+            .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
+        when {
+            ucbConfig.isEnabled && ucbConfig.dmaAltBillingOnlyEea -> {
+                // EEA DMA: only show our alt-billing option, no Google choice screen.
+                builder.enableAlternativeBillingOnly()
+                logger.info("billing", "UCB: Alternative Billing Only (EEA DMA mode)")
+            }
+            ucbConfig.isEnabled -> {
+                // Standard UCB: Google's choice screen routes the alt-billing
+                // selection back through our listener. The listener is required
+                // at construction — fail fast rather than silently lose the
+                // callback at runtime.
+                require(ucbChoiceListener != null) {
+                    "ucbChoiceListener required when ucbConfig.isEnabled && !dmaAltBillingOnlyEea"
+                }
+                builder.enableUserChoiceBilling(ucbChoiceListener)
+                logger.info("billing", "UCB: User Choice Billing enabled")
+            }
+            else -> {
+                logger.info("billing", "UCB: disabled — standard Play Billing")
+            }
+        }
+        builder.build()
+    }
 
     /**
      * Connect (idempotent). Suspends until the connection is established or fails.

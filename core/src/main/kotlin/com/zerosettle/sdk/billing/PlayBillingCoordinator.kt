@@ -93,14 +93,43 @@ internal class PlayBillingCoordinator(
     // keep working unchanged.
     private val onPurchaseSynced: (transactionId: String) -> Unit = {},
     private val onPurchaseFailed: (error: ZeroSettleError) -> Unit = {},
+    // UCB enablement (Phase 2 Chunk B). Defaults to disabled so existing call
+    // sites compile unchanged. Wiring of [UcbConfigRepository] into the
+    // bootstrap pipeline lands in Chunk D — until then the SDK runs in
+    // standard Play Billing mode regardless of tenant config.
+    ucbConfig: UcbConfig = UcbConfig.Disabled,
+    // Stripe-backed checkout launcher invoked when Google's choice screen
+    // routes the user to alt billing. Chunk C replaces the default no-op
+    // with `StripeCheckoutLauncher`. Only consulted when UCB is enabled in
+    // non-DMA mode (the DMA path doesn't show a choice screen at all).
+    ucbCheckoutLauncher: UcbCheckoutLauncher = NoopUcbCheckoutLauncher,
 ) {
     val queue: PlaySyncQueue = PlaySyncQueue(context.applicationContext)
+
+    // IMPORTANT field order: [ucbChoiceHandler] must be declared before
+    // [billing] because [billing]'s initializer reads it. Kotlin initializes
+    // top-level `val`s in source order — reversing this would pass `null` to
+    // [PlayBillingManager]'s require() check and crash construction when UCB
+    // is enabled in non-DMA mode.
+    private val ucbChoiceHandler: UcbChoiceHandler? =
+        if (ucbConfig.isEnabled && !ucbConfig.dmaAltBillingOnlyEea) {
+            UcbChoiceHandler(
+                scope = scope,
+                logger = logger,
+                launcher = ucbCheckoutLauncher,
+                userIdProvider = userIdProvider,
+            )
+        } else {
+            null
+        }
 
     private val billing = PlayBillingManager(
         context = context,
         obfuscatedAccountIdProvider = obfuscatedAccountIdProvider,
         onPurchases = { purchases -> scope.launch { handlePurchases(purchases) } },
         logger = logger,
+        ucbConfig = ucbConfig,
+        ucbChoiceListener = ucbChoiceHandler,
     )
 
     private val processor = PurchaseSyncProcessor(
