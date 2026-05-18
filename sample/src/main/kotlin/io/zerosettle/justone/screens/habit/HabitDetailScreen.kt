@@ -107,8 +107,7 @@ fun HabitDetailScreen(habitId: String, onBack: () -> Unit) {
                 onToggleToday = onToggleToday,
             )
 
-            // StreakSaverSection mounts here (Task 22)
-            Spacer(Modifier.height(0.dp))
+            StreakSaverSection(habit = h)
 
             MiniStatsRow(completions = completions, today = today)
         }
