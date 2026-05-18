@@ -43,5 +43,22 @@
             android:exported="false"
             android:theme="@style/Theme.ZeroSettleSheet"
             android:configChanges="orientation|screenSize|keyboardHidden" />
+        <!--
+            UcbPaymentSheetActivity — transparent host for Stripe's
+            PaymentSheet, fired when User Choice Billing (Play Billing 7.1)
+            routes the user to alternative billing. The activity owns no UI;
+            Theme.ZeroSettleSheet (translucent, no title bar) lets Stripe's
+            bottom-sheet render over the host app. See
+            billing/UcbPaymentSheetActivity.kt + billing/StripeCheckoutLauncher.kt
+            for the result-delivery bridge that returns the outcome to the
+            launcher's suspending caller. `configChanges` keeps the
+            PaymentSheet alive across rotation mid-payment, mirroring the
+            same flag on ZeroSettleWebViewActivity.
+        -->
+        <activity
+            android:name=".billing.UcbPaymentSheetActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ZeroSettleSheet"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
     </application>
 </manifest>

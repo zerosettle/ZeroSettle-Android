@@ -271,6 +271,34 @@ internal class Backend(
             .mapDecode(com.zerosettle.sdk.models.CheckoutTransaction.serializer())
 
     /**
+     * `POST /v1/iap/play-ucb/initiate/` — fires User Choice Billing alternative-
+     * payment checkout. The Play Billing UCB choice screen handed us a one-shot
+     * [externalTransactionToken]; the backend exchanges it (server-side) with
+     * Google's `externaltransactions.createexternaltransactiontoken`, mints a
+     * Stripe PaymentIntent on the merchant's connected account (Stripe Tax
+     * enabled), and returns the PaymentIntent `client_secret` + acct id so the
+     * SDK can present `PaymentSheet`.
+     *
+     * On error: backend can return 422 with `{"error":"stripe_tax_not_configured"}`
+     * (merchant hasn't enabled Stripe Tax) — caller surfaces this to the developer
+     * as a configuration failure. All other errors flow through the standard
+     * [ZeroSettleError.BackendError] / [ZeroSettleError.NetworkError] paths.
+     */
+    suspend fun initiatePlayUcb(
+        externalTransactionToken: String,
+        productId: String,
+        userId: String,
+    ): Result<UcbInitiateResponse> {
+        val req = UcbInitiateRequest(
+            externalTransactionToken = externalTransactionToken,
+            productId = productId,
+            userId = userId,
+        )
+        val body = json.encodeToString(UcbInitiateRequest.serializer(), req)
+        return http.post("/v1/iap/play-ucb/initiate/", body).mapDecode(UcbInitiateResponse.serializer())
+    }
+
+    /**
      * `POST /v1/iap/play-store-transactions/` — syncs a Play Billing purchase to the
      * backend (creates a Transaction + entitlement, or surfaces a cross-account
      * conflict).
@@ -478,6 +506,33 @@ internal data class BulkReconcileResponse(
 @Serializable
 internal data class TransactionHistoryResponse(
     val transactions: List<com.zerosettle.sdk.models.CheckoutTransaction> = emptyList(),
+)
+
+/**
+ * Request body for `POST /v1/iap/play-ucb/initiate/`. Mirrors the backend
+ * test fixtures' wire shape: snake_case field names.
+ */
+@Serializable
+internal data class UcbInitiateRequest(
+    @SerialName("external_transaction_token") val externalTransactionToken: String,
+    @SerialName("product_id") val productId: String,
+    @SerialName("user_id") val userId: String,
+)
+
+/**
+ * Response body for `POST /v1/iap/play-ucb/initiate/`. The backend always
+ * returns [clientSecret] and [externalTransactionId]; [stripeAccount],
+ * [merchantCountry], and [transactionId] are nullable to match the
+ * fixtures' edge-cases (e.g., platform-managed merchants with no Connect
+ * account; sub-period merchants without a transaction id yet).
+ */
+@Serializable
+internal data class UcbInitiateResponse(
+    @SerialName("client_secret") val clientSecret: String,
+    @SerialName("stripe_account") val stripeAccount: String? = null,
+    @SerialName("merchant_country") val merchantCountry: String? = null,
+    @SerialName("external_transaction_id") val externalTransactionId: String,
+    @SerialName("transaction_id") val transactionId: Long? = null,
 )
 
 @Serializable

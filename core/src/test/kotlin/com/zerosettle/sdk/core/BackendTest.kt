@@ -105,4 +105,56 @@ class BackendTest {
         assertThat(body).contains("\"purchase_token\":\"tok\"")
         assertThat(body).contains("\"package_name\":\"com.app\"")
     }
+
+    @Test fun initiatePlayUcb_postsBodyAndDecodesResponse() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{
+                    "client_secret":"pi_secret_xyz",
+                    "stripe_account":"acct_test_123",
+                    "merchant_country":"US",
+                    "external_transaction_id":"abcdef0123456789abcdef0123456789",
+                    "transaction_id":42
+                }""".trimIndent(),
+            ),
+        )
+        val res = backend.initiatePlayUcb(
+            externalTransactionToken = "tok-abc",
+            productId = "pro_monthly",
+            userId = "user-7",
+        )
+        assertThat(res.isSuccess).isTrue()
+        val resp = res.getOrThrow()
+        assertThat(resp.clientSecret).isEqualTo("pi_secret_xyz")
+        assertThat(resp.stripeAccount).isEqualTo("acct_test_123")
+        assertThat(resp.merchantCountry).isEqualTo("US")
+        assertThat(resp.externalTransactionId).isEqualTo("abcdef0123456789abcdef0123456789")
+        assertThat(resp.transactionId).isEqualTo(42)
+        val recorded = server.takeRequest()
+        assertThat(recorded.method).isEqualTo("POST")
+        assertThat(recorded.path).isEqualTo("/v1/iap/play-ucb/initiate/")
+        val body = recorded.body.readUtf8()
+        assertThat(body).contains("\"external_transaction_token\":\"tok-abc\"")
+        assertThat(body).contains("\"product_id\":\"pro_monthly\"")
+        assertThat(body).contains("\"user_id\":\"user-7\"")
+    }
+
+    @Test fun initiatePlayUcb_optionalFieldsTolerateNulls() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{
+                    "client_secret":"pi_secret_xyz",
+                    "stripe_account":null,
+                    "merchant_country":null,
+                    "external_transaction_id":"abcdef0123456789abcdef0123456789"
+                }""".trimIndent(),
+            ),
+        )
+        val res = backend.initiatePlayUcb("tok", "pro", "u")
+        assertThat(res.isSuccess).isTrue()
+        val resp = res.getOrThrow()
+        assertThat(resp.stripeAccount).isNull()
+        assertThat(resp.merchantCountry).isNull()
+        assertThat(resp.transactionId).isNull()
+    }
 }
