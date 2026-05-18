@@ -1,6 +1,7 @@
 package io.zerosettle.justone.screens.developer
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -109,14 +110,16 @@ fun DeveloperScreen(onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(innerPadding)
 
-            when (selected) {
-                0 -> EnvSwitcherScreen(onIdentified = {})
-                1 -> EntitlementsScreen()
-                2 -> OffersScreen()
-                3 -> PendingActionsScreen()
-                4 -> CancelDebugScreen()
-                5 -> UpgradeOfferScreen()
-                6 -> DebugScreen()
+            Box(modifier = contentModifier) {
+                when (selected) {
+                    0 -> EnvSwitcherScreen(onIdentified = {})
+                    1 -> EntitlementsScreen()
+                    2 -> OffersScreen()
+                    3 -> PendingActionsScreen()
+                    4 -> CancelDebugScreen()
+                    5 -> UpgradeOfferScreen()
+                    6 -> DebugScreen()
+                }
             }
         }
     }

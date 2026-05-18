@@ -8,12 +8,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import io.zerosettle.justone.screens.auth.CreateUserScreen
 import io.zerosettle.justone.screens.cancel.CancelFlowScreen
+import io.zerosettle.justone.screens.developer.DeveloperScreen
 import io.zerosettle.justone.screens.habit.AddHabitScreen
 import io.zerosettle.justone.screens.habit.HabitDetailScreen
 import io.zerosettle.justone.screens.home.HomeScreen
 import io.zerosettle.justone.screens.paywall.LaunchPaywallScreen
 import io.zerosettle.justone.screens.paywall.PremiumUpsellSheet
-import io.zerosettle.justone.screens.developer.DeveloperScreen
 import io.zerosettle.justone.screens.settings.SettingsScreen
 import io.zerosettle.justone.screens.shop.ConsumableShopScreen
 
