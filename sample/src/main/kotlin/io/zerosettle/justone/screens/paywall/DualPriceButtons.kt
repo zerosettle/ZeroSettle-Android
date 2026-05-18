@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,7 +33,8 @@ fun DualPriceButtons(
     modifier: Modifier = Modifier,
 ) {
     val activity = LocalContext.current as android.app.Activity
-    val product = ZeroSettle.product(productId)
+    val products by ZeroSettle.products.collectAsState()
+    val product = remember(products) { ZeroSettle.product(productId) }
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
 
@@ -106,6 +108,13 @@ fun DualPriceButtons(
                     enabled = !busy,
                     modifier = Modifier.weight(1f),
                 ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
                     Text("Google Play")
                 }
             }
