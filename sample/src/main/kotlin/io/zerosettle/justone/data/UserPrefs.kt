@@ -16,7 +16,9 @@ private val Context.dataStore by preferencesDataStore(name = "justone_user")
  * Wraps DataStore Preferences for app identity + reminder + paywall state.
  * `userId` presence gates the Onboarding vs Main route tree.
  */
-class UserPrefs(private val ctx: Context) {
+class UserPrefs(context: Context) {
+
+    private val ctx: Context = context.applicationContext
 
     private object Keys {
         val USER_ID = stringPreferencesKey("user_id")
