@@ -25,6 +25,60 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
+ * Outcome of interpreting a single [PurchasesUpdatedListener] fire.
+ *
+ * The listener delivers exactly one of these per callback:
+ *  - [Deliver]: `OK` with a non-empty purchase list — hand off to the normal
+ *    sync path.
+ *  - [Fail]: a terminal result that means "no purchase is coming" — the
+ *    purchase flow ended without a purchase, so any in-flight
+ *    `purchaseViaPlayBilling()` deferred must be resolved with a failure
+ *    rather than left hanging. Covers `USER_CANCELED` (mapped to
+ *    [ZeroSettleError.PurchaseCancelled]), every other non-`OK` code, AND
+ *    `OK` with a null/empty purchase list (Play can report this when the
+ *    flow closes without yielding a purchase).
+ */
+internal sealed interface PurchaseListenerOutcome {
+    data class Deliver(val purchases: List<Purchase>) : PurchaseListenerOutcome
+    data class Fail(val error: ZeroSettleError) : PurchaseListenerOutcome
+}
+
+/**
+ * Pure classifier for a [PurchasesUpdatedListener] fire — top-level so it's
+ * unit-testable without an Android context or a real [BillingClient] (mirrors
+ * [isConsumable] / [playBillingProductType]).
+ *
+ * `OK` + non-empty purchases → [PurchaseListenerOutcome.Deliver]. Everything
+ * else → [PurchaseListenerOutcome.Fail]:
+ *  - `USER_CANCELED` → [ZeroSettleError.PurchaseCancelled] (a cancellation,
+ *    not a generic error — the SDK distinguishes them).
+ *  - any other non-`OK` code → [ZeroSettleError.PlayBillingError] via
+ *    [PlayBillingManager.mapBillingError].
+ *  - `OK` with a null/empty purchase list → [ZeroSettleError.PurchaseCancelled]:
+ *    the flow closed without yielding a purchase, semantically equivalent to
+ *    a cancellation from the caller's perspective.
+ *
+ * The historical leak this fixes: the listener used to silently swallow
+ * `USER_CANCELED` (and merely log other non-`OK` codes), so a
+ * `purchaseViaPlayBilling()` caller awaiting the deferred-bridge hung forever
+ * when the user dismissed the Play sheet / choice screen.
+ */
+internal fun classifyPurchaseListenerResult(
+    responseCode: Int,
+    debugMessage: String,
+    purchases: List<Purchase>?,
+): PurchaseListenerOutcome = when {
+    responseCode == BillingClient.BillingResponseCode.OK && !purchases.isNullOrEmpty() ->
+        PurchaseListenerOutcome.Deliver(purchases)
+    responseCode == BillingClient.BillingResponseCode.OK ->
+        // OK but nothing delivered — treat as a cancellation so an armed
+        // deferred resolves instead of hanging.
+        PurchaseListenerOutcome.Fail(ZeroSettleError.PurchaseCancelled)
+    else ->
+        PurchaseListenerOutcome.Fail(PlayBillingManager.mapBillingError(responseCode, debugMessage))
+}
+
+/**
  * Owns the [BillingClient]: connection lifecycle (with auto-reconnect),
  * `queryProductDetails`, `launchBillingFlow` (with the deterministic
  * `obfuscatedAccountId`), the [PurchasesUpdatedListener], `acknowledgePurchase`,
@@ -41,6 +95,16 @@ public class PlayBillingManager(
     private val obfuscatedAccountIdProvider: () -> String?,
     private val onPurchases: (List<Purchase>) -> Unit,
     private val logger: ZeroSettleLogger,
+    // Terminal-failure hook for the [PurchasesUpdatedListener]. Invoked when
+    // the listener fires with a result that means "no purchase is coming"
+    // (user cancelled the Play sheet / choice screen, item unavailable,
+    // service error, etc.). The SDK wires this to resolve any in-flight
+    // [com.zerosettle.sdk.ZeroSettle.purchaseViaPlayBilling] deferred — without
+    // it, a cancelled purchase strands that suspend call forever (cancel-hang).
+    // Defaults to a no-op so non-bridging call sites compile unchanged; the
+    // wired lambda is itself null-guarded on the deferred slot, so the
+    // redelivery-on-relaunch path (no awaiter armed) stays a clean no-op.
+    private val onPurchaseFailed: (ZeroSettleError) -> Unit = {},
     // UCB enablement (Phase 2 Chunk B). Defaults preserve binary/source
     // compatibility for existing call sites — when [UcbConfig.isEnabled] is
     // false (the default), the BillingClient builder is identical to the
@@ -51,10 +115,17 @@ public class PlayBillingManager(
     private val app = context.applicationContext
 
     private val purchasesListener = PurchasesUpdatedListener { result, purchases ->
-        if (result.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
-            onPurchases(purchases)
-        } else if (result.responseCode != BillingClient.BillingResponseCode.USER_CANCELED) {
-            logger.warn("billing", "PurchasesUpdated error ${result.responseCode}: ${result.debugMessage}")
+        when (val outcome = classifyPurchaseListenerResult(result.responseCode, result.debugMessage, purchases)) {
+            is PurchaseListenerOutcome.Deliver -> onPurchases(outcome.purchases)
+            is PurchaseListenerOutcome.Fail -> {
+                // Terminal: no purchase is coming. Route through the failure
+                // hook so any awaiting purchaseViaPlayBilling() deferred
+                // resolves with Result.failure instead of hanging.
+                if (outcome.error !is ZeroSettleError.PurchaseCancelled) {
+                    logger.warn("billing", "PurchasesUpdated error ${result.responseCode}: ${result.debugMessage}")
+                }
+                onPurchaseFailed(outcome.error)
+            }
         }
     }
 
@@ -177,6 +248,21 @@ public class PlayBillingManager(
     }
 
     public fun endConnection() { client.endConnection() }
+
+    /**
+     * Test-only: drive the [PurchasesUpdatedListener] path directly with a
+     * synthetic result. Robolectric can't provision real Play Services, so a
+     * test can't make the system fire the listener — this seam lets a test
+     * exercise the exact branching (and `onPurchaseFailed` wiring) the real
+     * BillingClient callback would. Mirrors
+     * [PlayBillingCoordinator.processPurchaseForTesting].
+     */
+    internal fun simulateListenerForTesting(responseCode: Int, debugMessage: String, purchases: List<Purchase>?) {
+        purchasesListener.onPurchasesUpdated(
+            BillingResult.newBuilder().setResponseCode(responseCode).setDebugMessage(debugMessage).build(),
+            purchases,
+        )
+    }
 
     public companion object {
         public fun mapBillingError(responseCode: Int, debugMessage: String): ZeroSettleError = when (responseCode) {

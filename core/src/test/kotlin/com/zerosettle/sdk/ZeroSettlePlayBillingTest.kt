@@ -170,6 +170,67 @@ class ZeroSettlePlayBillingTest {
      * real `BillingClient` which we can't make throw deterministically. The
      * `processor.process()` contract is what we're pinning.
      */
+    // ─── Cancel-hang regression ──────────────────────────────────────────────
+    //
+    // Before the fix, PlayBillingManager's PurchasesUpdatedListener silently
+    // swallowed USER_CANCELED — so dismissing the Play sheet / choice screen
+    // left a pending purchaseViaPlayBilling() deferred unresolved forever
+    // (hung until process death). The listener now routes terminal results
+    // through onPurchaseFailed, resolving the deferred with a failure.
+    //
+    // Without the fix these tests hang and fail via withTimeout.
+
+    @Test fun listenerUserCanceled_resolvesAwaiterWithPurchaseCancelled() = runTest {
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        // Arm the slot as purchaseViaPlayBilling() would BEFORE launching the
+        // Play dialog (the real dialog launch needs a BillingClient Robolectric
+        // can't provide).
+        val deferred = ZeroSettle.armPendingPlayPurchaseForTesting()
+
+        // User dismisses the Play purchase sheet / UCB choice screen.
+        ZeroSettle.playCoordinator!!.simulateListenerForTesting(
+            com.android.billingclient.api.BillingClient.BillingResponseCode.USER_CANCELED,
+            "user dismissed",
+            purchases = null,
+        )
+
+        val err = try {
+            withTimeout(5000) { deferred.await() }
+            error("expected deferred to complete exceptionally (cancel must not hang)")
+        } catch (e: com.zerosettle.sdk.models.ZeroSettleError) {
+            e
+        }
+        assertThat(err).isEqualTo(ZeroSettleError.PurchaseCancelled)
+    }
+
+    @Test fun listenerServiceError_resolvesAwaiterWithPlayBillingError() = runTest {
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        val deferred = ZeroSettle.armPendingPlayPurchaseForTesting()
+        ZeroSettle.playCoordinator!!.simulateListenerForTesting(
+            com.android.billingclient.api.BillingClient.BillingResponseCode.SERVICE_UNAVAILABLE,
+            "billing service down",
+            purchases = null,
+        )
+
+        val err = try {
+            withTimeout(5000) { deferred.await() }
+            error("expected deferred to complete exceptionally")
+        } catch (e: com.zerosettle.sdk.models.ZeroSettleError) {
+            e
+        }
+        assertThat(err).isInstanceOf(ZeroSettleError.PlayBillingError::class.java)
+    }
+
     @Test fun deferredBridge_resolvesEvenWhenAcknowledgeThrows() = runTest {
         // Standalone processor with the same callback wiring as the production
         // coordinator. If `acknowledge` throwing strands the deferred, this test

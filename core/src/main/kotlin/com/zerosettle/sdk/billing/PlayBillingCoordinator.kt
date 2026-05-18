@@ -128,6 +128,12 @@ internal class PlayBillingCoordinator(
         obfuscatedAccountIdProvider = obfuscatedAccountIdProvider,
         onPurchases = { purchases -> scope.launch { handlePurchases(purchases) } },
         logger = logger,
+        // Terminal listener failures (USER_CANCELED, item unavailable, service
+        // errors, OK-with-no-purchases) flow into the SAME `onPurchaseFailed`
+        // bridge the sync processor uses — resolving any in-flight
+        // purchaseViaPlayBilling() deferred with Result.failure. Fixes the
+        // cancel-hang where dismissing the Play sheet stranded the caller.
+        onPurchaseFailed = onPurchaseFailed,
         ucbConfig = ucbConfig,
         ucbChoiceListener = ucbChoiceHandler,
     )
@@ -196,6 +202,18 @@ internal class PlayBillingCoordinator(
     internal suspend fun processPurchaseForTesting(purchase: Purchase) {
         val uid = userIdProvider() ?: return
         processor.process(PlayBillingManager.describePurchase(purchase, uid, customerNameProvider(), customerEmailProvider()))
+    }
+
+    /**
+     * Test-only: drive the [PlayBillingManager] purchases listener with a
+     * synthetic billing result — exercises the cancel-hang fix end-to-end
+     * through the same coordinator `configure()` built, including the
+     * `onPurchaseFailed` bridge that resolves any in-flight
+     * `purchaseViaPlayBilling()` deferred. Robolectric can't make a real
+     * BillingClient fire the listener, so this seam stands in for it.
+     */
+    internal fun simulateListenerForTesting(responseCode: Int, debugMessage: String, purchases: List<Purchase>?) {
+        billing.simulateListenerForTesting(responseCode, debugMessage, purchases)
     }
 
     private suspend fun runReconcile() {
