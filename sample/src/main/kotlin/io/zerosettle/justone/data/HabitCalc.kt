@@ -46,3 +46,14 @@ fun currentStreak(
     }
     return streak
 }
+
+/**
+ * Shading intensity (0f..1f) for a heatmap cell: the day's completion count scaled
+ * against the busiest day in [completionsByDay]. Absent / zero days return 0f.
+ */
+fun heatmapIntensity(completionsByDay: Map<String, Int>, dayKey: String): Float {
+    val count = completionsByDay[dayKey] ?: 0
+    if (count <= 0) return 0f
+    val max = completionsByDay.values.maxOrNull() ?: 0
+    return if (max <= 0) 0f else (count.toFloat() / max.toFloat()).coerceIn(0f, 1f)
+}

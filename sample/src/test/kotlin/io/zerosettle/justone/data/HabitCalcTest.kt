@@ -54,4 +54,15 @@ class HabitCalcTest {
         )
         assertThat(currentStreak(completions, 3, LocalDate.of(2026, 5, 20))).isEqualTo(1)
     }
+
+    @Test fun heatmapIntensity_absentDay_isZero() {
+        assertThat(heatmapIntensity(emptyMap(), "2026-05-20")).isEqualTo(0f)
+        assertThat(heatmapIntensity(mapOf("2026-05-19" to 2), "2026-05-20")).isEqualTo(0f)
+    }
+
+    @Test fun heatmapIntensity_scalesAgainstMax() {
+        val byDay = mapOf("2026-05-19" to 2, "2026-05-20" to 4)
+        assertThat(heatmapIntensity(byDay, "2026-05-19")).isEqualTo(0.5f)
+        assertThat(heatmapIntensity(byDay, "2026-05-20")).isEqualTo(1.0f)
+    }
 }
