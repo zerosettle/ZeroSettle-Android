@@ -12,7 +12,7 @@ import com.zerosettle.sdk.Identity
  * prefix is validated) but every backend call 401s until you replace it.
  */
 internal object SampleConfig {
-    const val PUBLISHABLE_KEY = "zs_pk_test_68314ca8d4a87a4c44adc978aef6523deae4296cc1a325a3"
+    const val PUBLISHABLE_KEY = "zs_pk_test_55cc0bdc80d2a3274238e00f74ca78f668e83f0ad8a46b48"
     const val TEST_USER_ID = "sample-user-1"
 
     /**
@@ -21,12 +21,12 @@ internal object SampleConfig {
      * For [CUSTOM] the URL comes from the persisted custom-URL field instead.
      */
     enum class Env(val label: String, val baseUrl: String?) {
-        PRODUCTION("Production (live API)", null),
+        PRODUCTION("Production (live API)", "https://api.zerosettle.io"),
         // Adjust if your staging host differs (Render service URL, custom domain, etc.).
         STAGING("Staging", "https://api-staging.zerosettle.io"),
         // The Android emulator's loopback alias for the host machine's localhost.
         // Requires android:usesCleartextTraffic="true" in the manifest (already set).
-        LOCAL_EMULATOR("Local — emulator (10.0.2.2:8000)", "http://10.0.2.2:8000"),
+        LOCAL_EMULATOR("Local — emulator (api.zerosettle.ngrok.app)", "https://api.zerosettle.ngrok.app"),
         // Free-form: paste an ngrok tunnel, a LAN IP (http://192.168.x.x:8000), etc.
         CUSTOM("Custom…", null),
     }

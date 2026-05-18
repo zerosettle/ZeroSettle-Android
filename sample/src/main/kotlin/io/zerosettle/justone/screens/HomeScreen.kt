@@ -111,7 +111,16 @@ fun HomeScreen() {
                             }) { Text("Buy — Web") }
                             OutlinedButton(onClick = {
                                 scope.launch {
+                                    val sdkProducts = ZeroSettle.products.value
+                                    android.util.Log.w(
+                                        "ZS-debug",
+                                        "tap Buy-Play: p.id=${p.id!!} sdk.products.size=${sdkProducts.size} sdk.products.ids=${sdkProducts.map { it.id }}",
+                                    )
                                     val r = ZeroSettle.purchaseViaPlayBilling(activity, p.id)
+                                    android.util.Log.w(
+                                        "ZS-debug",
+                                        "purchaseViaPlayBilling returned: success=${r.isSuccess} error=${r.exceptionOrNull()?.message}",
+                                    )
                                     lastAction = if (r.isSuccess) "Play purchase completed: txn=${r.getOrNull()?.id}" else "Play purchase failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }) { Text("Buy — Google Play") }
