@@ -9,8 +9,8 @@
     <uses-permission android:name="com.android.vending.BILLING" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
-        android:name=".SampleApplication"
-        android:label="ZeroSettle Sample"
+        android:name=".JustOneApplication"
+        android:label="JustOne"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
@@ -29,11 +29,5 @@
                 <data android:scheme="zerosettle" android:host="checkout" />
             </intent-filter>
         </activity>
-        <!-- Pre-rewrite debug harness Activity. No longer the launcher; kept
-             declared until the Phase 4 cutover, then deleted. -->
-        <activity
-            android:name=".SampleActivity"
-            android:exported="false"
-            android:launchMode="singleTop" />
     </application>
 </manifest>

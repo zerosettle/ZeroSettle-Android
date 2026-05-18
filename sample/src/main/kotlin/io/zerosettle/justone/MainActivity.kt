@@ -22,7 +22,6 @@ import io.zerosettle.justone.app.JustOneNav
 import io.zerosettle.justone.app.JustOneTheme
 import io.zerosettle.justone.app.Routes
 import io.zerosettle.justone.data.UserPrefs
-import io.zerosettle.justone.legacy.LegacyDebugRoot
 import io.zerosettle.justone.sdk.OfferHolder
 import com.zerosettle.sdk.Identity
 import com.zerosettle.sdk.ZeroSettle
@@ -39,10 +38,6 @@ class MainActivity : ComponentActivity() {
         handleCheckoutCallback(intent)
         setContent {
             JustOneTheme {
-                if (!BuildConfig.USE_JUSTONE_NAV) {
-                    LegacyDebugRoot()
-                    return@JustOneTheme
-                }
                 JustOneRoot()
             }
         }

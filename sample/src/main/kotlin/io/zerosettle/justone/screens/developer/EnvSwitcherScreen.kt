@@ -80,7 +80,7 @@ fun EnvSwitcherScreen(onIdentified: () -> Unit) {
             val r = ZeroSettle.identify(identity)
             if (r.isSuccess) {
                 // Persist the choice so the user isn't re-prompted on next
-                // cold start — replayed by SampleActivity's LaunchedEffect.
+                // cold start — replayed by MainActivity's LaunchedEffect.
                 SampleConfig.saveIdentity(ctx, identity)
                 OfferHolder.reset()
                 status = "Identified ($effectiveUrl). bootstrapped=${ZeroSettle.isBootstrapped.value}"

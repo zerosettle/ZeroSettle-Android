@@ -31,9 +31,9 @@ android {
         applicationId = "io.zerosettle.justone"
         minSdk = 23
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.0.4"
-        buildConfigField("Boolean", "USE_JUSTONE_NAV", "false")
+        versionCode = 6
+        versionName = "2.0.0"
+        buildConfigField("Boolean", "USE_JUSTONE_NAV", "true")
     }
 
     signingConfigs {
