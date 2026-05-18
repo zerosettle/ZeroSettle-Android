@@ -12,6 +12,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -27,6 +28,9 @@ import com.zerosettle.sdk.Identity
 import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+/** Sentinel used to distinguish "DataStore not yet loaded" from a real `null` (never dismissed). */
+private const val PAYWALL_SENTINEL_LOADING = Long.MIN_VALUE
 
 class MainActivity : ComponentActivity() {
 
@@ -98,4 +102,24 @@ private fun JustOneRoot() {
     LaunchedEffect(userId) { if (userId == null) OfferHolder.reset() }
 
     JustOneNav(nav, startDestination = dest)
+
+    // Launch-paywall trigger (spec §5): fires once per session on cold launch.
+    // A non-premium user who has never dismissed the paywall is navigated to LAUNCH_PAYWALL.
+    val isBootstrapped by ZeroSettle.isBootstrapped.collectAsState()
+    val entitlements by ZeroSettle.entitlements.collectAsState()
+    val identity by prefs.identity.collectAsState(initial = null)
+    val dismissedAt by prefs.paywallDismissedAt.collectAsState(initial = PAYWALL_SENTINEL_LOADING)
+    var paywallEvaluated by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(isBootstrapped, entitlements, dismissedAt, identity) {
+        if (paywallEvaluated) return@LaunchedEffect
+        if (!isBootstrapped) return@LaunchedEffect
+        if (dismissedAt == PAYWALL_SENTINEL_LOADING) return@LaunchedEffect   // prefs not loaded yet
+        if (identity == null) return@LaunchedEffect                          // onboarding tree — no paywall
+        val isPremium = entitlements.any { it.isActive && it.productType != "consumable" }
+        paywallEvaluated = true
+        if (!isPremium && dismissedAt == null) {
+            nav.navigate(Routes.LAUNCH_PAYWALL) { launchSingleTop = true }
+        }
+    }
 }
