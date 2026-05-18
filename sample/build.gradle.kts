@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 // Optional release-signing credentials. Generate a keystore with
@@ -32,6 +33,7 @@ android {
         targetSdk = 36
         versionCode = 5
         versionName = "1.0.4"
+        buildConfigField("Boolean", "USE_JUSTONE_NAV", "false")
     }
 
     signingConfigs {
@@ -66,12 +68,17 @@ android {
 
     kotlin { jvmToolchain(17) }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     sourceSets {
         getByName("main").java.srcDirs("src/main/kotlin")
     }
 }
+
+ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 dependencies {
     implementation(project(":core"))
@@ -91,4 +98,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.navigation.compose)
     debugImplementation(libs.compose.ui.tooling)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.work.runtime.ktx)
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
 }
