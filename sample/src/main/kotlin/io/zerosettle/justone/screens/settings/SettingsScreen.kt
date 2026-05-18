@@ -59,13 +59,17 @@ fun SettingsScreen(
 
 
 
-            // StreakSaverCard — Task 28
+            item {
+                StreakSaverCard(onBuyMore = onOpenShop)
+            }
 
             item {
                 ReminderCard()
             }
 
-            // OfferCardSlot — Task 28
+            item {
+                OfferCardSlot()
+            }
         }
     }
 }
