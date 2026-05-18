@@ -7,6 +7,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import io.zerosettle.justone.screens.auth.CreateUserScreen
 
 object Routes {
     const val CREATE_USER = "create-user"
@@ -27,7 +28,11 @@ object Routes {
 @Composable
 fun JustOneNav(nav: NavHostController, startDestination: String) {
     NavHost(nav, startDestination = startDestination) {
-        composable(Routes.CREATE_USER) { Text(Routes.CREATE_USER) }
+        composable(Routes.CREATE_USER) {
+            CreateUserScreen(onCreated = {
+                nav.navigate(Routes.HOME) { popUpTo(Routes.CREATE_USER) { inclusive = true } }
+            })
+        }
         composable(Routes.HOME) { Text(Routes.HOME) }
         composable(
             Routes.HABIT_DETAIL,
