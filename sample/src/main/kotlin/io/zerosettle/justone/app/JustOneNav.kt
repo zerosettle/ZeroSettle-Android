@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import io.zerosettle.justone.screens.auth.CreateUserScreen
+import io.zerosettle.justone.screens.cancel.CancelFlowScreen
 import io.zerosettle.justone.screens.habit.AddHabitScreen
 import io.zerosettle.justone.screens.habit.HabitDetailScreen
 import io.zerosettle.justone.screens.home.HomeScreen
@@ -82,7 +83,10 @@ fun JustOneNav(nav: NavHostController, startDestination: String) {
         composable(
             Routes.CANCEL_FLOW,
             arguments = listOf(navArgument("productId") { type = NavType.StringType }),
-        ) { Text(Routes.CANCEL_FLOW) }
+        ) { backStackEntry ->
+            val productId = backStackEntry.arguments?.getString("productId").orEmpty()
+            CancelFlowScreen(productId = productId, onDone = { nav.popBackStack() })
+        }
         composable(Routes.DEVELOPER) { Text(Routes.DEVELOPER) }
     }
 }
