@@ -1,4 +1,4 @@
-package io.zerosettle.justone.screens
+package io.zerosettle.justone.screens.developer
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -27,9 +27,9 @@ import com.zerosettle.sdk.models.CancelFlow
 import com.zerosettle.ui.ZeroSettleCancelFlow
 import kotlinx.coroutines.launch
 
-/** Server-driven retention / cancel flow — mirrors JustOne's CancelFlowView. */
+/** Developer tool: server-driven retention / cancel flow test harness — mirrors JustOne's CancelFlowView. */
 @Composable
-fun CancelFlowScreen() {
+fun CancelDebugScreen() {
     val entitlements by ZeroSettle.entitlements.collectAsState()
     val scope = rememberCoroutineScope()
     var config by remember { mutableStateOf<CancelFlow.Config?>(null) }

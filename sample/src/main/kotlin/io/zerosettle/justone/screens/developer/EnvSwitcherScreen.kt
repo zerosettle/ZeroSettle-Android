@@ -1,4 +1,4 @@
-package io.zerosettle.justone.screens
+package io.zerosettle.justone.screens.developer
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -35,12 +36,12 @@ import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.launch
 
 /**
- * Identify screen — pick a backend env (production / staging / local emulator /
- * custom), then identify. Mirrors JustOne's LoginView. The env choice is persisted
- * (SharedPreferences) and reused on next launch.
+ * Developer tool: pick a backend env (production / staging / local emulator /
+ * custom), then identify. The env choice is persisted (SharedPreferences) and
+ * reused on next launch.
  */
 @Composable
-fun SignInScreen(onIdentified: () -> Unit) {
+fun EnvSwitcherScreen(onIdentified: () -> Unit) {
     val ctx = LocalContext.current
     var userId by remember { mutableStateOf(SampleConfig.TEST_USER_ID) }
     var name by remember { mutableStateOf("Sample User") }
@@ -94,6 +95,11 @@ fun SignInScreen(onIdentified: () -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Text(
+            "Use this screen to test against arbitrary backends. For normal use, the app auto-creates a user on first launch.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Text("ZeroSettle Sample — Sign in")
         Text("configured=$configured  bootstrapped=$bootstrapped")
 

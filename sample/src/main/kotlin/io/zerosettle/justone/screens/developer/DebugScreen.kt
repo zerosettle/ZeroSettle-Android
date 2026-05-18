@@ -1,4 +1,4 @@
-package io.zerosettle.justone.screens
+package io.zerosettle.justone.screens.developer
 
 import android.content.ClipData
 import android.content.ClipboardManager

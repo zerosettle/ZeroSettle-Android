@@ -20,14 +20,14 @@ import androidx.navigation.compose.rememberNavController
 import io.zerosettle.justone.BOTTOM_TABS
 import io.zerosettle.justone.Routes
 import io.zerosettle.justone.SampleConfig
-import io.zerosettle.justone.screens.CancelFlowScreen
-import io.zerosettle.justone.screens.DebugScreen
-import io.zerosettle.justone.screens.EntitlementsScreen
 import io.zerosettle.justone.screens.HomeScreen
-import io.zerosettle.justone.screens.OffersScreen
-import io.zerosettle.justone.screens.PendingActionsScreen
-import io.zerosettle.justone.screens.SignInScreen
-import io.zerosettle.justone.screens.UpgradeOfferScreen
+import io.zerosettle.justone.screens.developer.CancelDebugScreen
+import io.zerosettle.justone.screens.developer.DebugScreen
+import io.zerosettle.justone.screens.developer.EntitlementsScreen
+import io.zerosettle.justone.screens.developer.EnvSwitcherScreen
+import io.zerosettle.justone.screens.developer.OffersScreen
+import io.zerosettle.justone.screens.developer.PendingActionsScreen
+import io.zerosettle.justone.screens.developer.UpgradeOfferScreen
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.ui.theme.ZeroSettleTheme
 
@@ -120,7 +120,7 @@ fun LegacyDebugRoot() {
                     modifier = Modifier.padding(padding),
                 ) {
                     composable(Routes.SIGN_IN) {
-                        SignInScreen(onIdentified = {
+                        EnvSwitcherScreen(onIdentified = {
                             nav.navigate(Routes.HOME) {
                                 popUpTo(Routes.SIGN_IN) { inclusive = true }
                                 launchSingleTop = true
@@ -131,7 +131,7 @@ fun LegacyDebugRoot() {
                     composable(Routes.ENTITLEMENTS) { EntitlementsScreen() }
                     composable(Routes.OFFERS) { OffersScreen() }
                     composable(Routes.PENDING) { PendingActionsScreen() }
-                    composable(Routes.CANCEL) { CancelFlowScreen() }
+                    composable(Routes.CANCEL) { CancelDebugScreen() }
                     composable(Routes.UPGRADE) { UpgradeOfferScreen() }
                     composable(Routes.DEBUG) { DebugScreen() }
                 }
