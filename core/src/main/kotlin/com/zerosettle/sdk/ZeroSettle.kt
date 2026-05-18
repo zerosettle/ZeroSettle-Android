@@ -424,6 +424,11 @@ public object ZeroSettle {
      * Reflects the server's `PlayBillingConfig.is_enabled` field. Starts
      * `false`, updates once after [identify] completes bootstrap, and resets
      * to `false` on [configure] (new tenant/key).
+     *
+     * Tenant/market-scoped: because it reflects the server `PlayBillingConfig`
+     * and not the signed-in user, it is reset on [configure] but intentionally
+     * **not** on [logout] — a logout/re-identify cycle does not change UCB
+     * enablement.
      */
     private val _isUcbEnabled = MutableStateFlow(false)
     public val isUcbEnabled: StateFlow<Boolean> = _isUcbEnabled.asStateFlow()
@@ -1217,6 +1222,7 @@ public object ZeroSettle {
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
         _pendingCheckout.value = false
+        _isUcbEnabled.value = false
         pendingCheckoutDeferred?.cancel()
         pendingCheckoutDeferred = null
         pendingPlayPurchaseDeferred?.cancel()
