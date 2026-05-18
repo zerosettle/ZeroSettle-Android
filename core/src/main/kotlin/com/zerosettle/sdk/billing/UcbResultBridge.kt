@@ -9,11 +9,41 @@ import kotlinx.coroutines.CompletableDeferred
  * Distinct from [com.zerosettle.sdk.models.ZeroSettleError] so the bridge
  * stays a thin Activity↔launcher channel — the launcher maps each variant
  * onto an SDK-facing `Result` at its boundary.
+ *
+ * [Completed] carries the IDs minted by the `/v1/iap/play-ucb/initiate/`
+ * response so the deferred-bridge consumer in [com.zerosettle.sdk.ZeroSettle]
+ * can hydrate a `CheckoutTransaction` without a second round-trip. The
+ * activity doesn't know these IDs — they're folded in by the bridge from
+ * what the launcher reserved.
  */
 internal sealed class UcbPurchaseOutcome {
-    object Completed : UcbPurchaseOutcome()
+    /**
+     * @property externalTransactionId The opaque ID minted by the backend's
+     *   `/v1/iap/play-ucb/initiate/` (matches `Transaction.external_transaction_id`).
+     * @property transactionId The numeric `Transaction.id` (or null when the
+     *   backend couldn't materialise a row — currently never null on success).
+     */
+    data class Completed(
+        val externalTransactionId: String,
+        val transactionId: Long?,
+    ) : UcbPurchaseOutcome()
     object Canceled : UcbPurchaseOutcome()
     data class Failed(val message: String) : UcbPurchaseOutcome()
+}
+
+/**
+ * Result signal that [UcbPaymentSheetActivity] knows how to emit — the
+ * activity ONLY observes whether the PaymentSheet completed/canceled/failed;
+ * the transaction IDs were reserved by the launcher from the `/initiate/`
+ * response and aren't visible from inside the PaymentSheet callback.
+ *
+ * The bridge composes this with the reserved IDs to produce the final
+ * [UcbPurchaseOutcome] handed to the suspending caller.
+ */
+internal sealed class PaymentSheetStatus {
+    object Completed : PaymentSheetStatus()
+    object Canceled : PaymentSheetStatus()
+    data class Failed(val message: String) : PaymentSheetStatus()
 }
 
 /**
@@ -33,12 +63,10 @@ internal sealed class UcbPurchaseOutcome {
  * a `suspend fun launch()` call site without callback gymnastics.
  *
  * So we use a process-static rendezvous: the launcher reserves the bridge
- * (a fresh [CompletableDeferred]) before dispatching the Intent, then awaits.
- * The Activity completes the deferred at its result delivery point. The
- * pattern is closely related to how `ZeroSettleWebViewActivity` routes its
- * deep-link return through [com.zerosettle.sdk.ZeroSettle.completeWebCheckout]
- * (which fans out to a SDK-singleton-owned deferred), and is functionally
- * equivalent — just scoped to UCB instead of web checkout.
+ * (a fresh [CompletableDeferred] + the IDs from `/initiate/`) before
+ * dispatching the Intent, then awaits. The Activity completes the deferred
+ * at its result delivery point — emitting a [PaymentSheetStatus] which the
+ * bridge composes into a final [UcbPurchaseOutcome] using the reserved IDs.
  *
  * **Single-flight invariant.** Only one UCB checkout can be in flight at a
  * time (Google issues exactly one `externalTransactionToken` per
@@ -52,14 +80,26 @@ internal sealed class UcbPurchaseOutcome {
  */
 internal object UcbResultBridge {
 
+    /**
+     * Holds the deferred + the IDs the launcher reserved from the `/initiate/`
+     * response. The IDs are baked in by [composeCompleted] when the activity
+     * delivers a successful [PaymentSheetStatus.Completed].
+     */
+    private data class Pending(
+        val deferred: CompletableDeferred<UcbPurchaseOutcome>,
+        val externalTransactionId: String,
+        val transactionId: Long?,
+    )
+
     @Volatile
-    private var pending: CompletableDeferred<UcbPurchaseOutcome>? = null
+    private var pending: Pending? = null
 
     /**
-     * Reserve the bridge for one outcome delivery. Returns the deferred to
-     * await. If a previous bridge is still armed, the previous deferred is
-     * completed exceptionally with a cancellation so the abandoned caller
-     * doesn't leak — fail-loud rather than silent overwrite.
+     * Reserve the bridge for one outcome delivery with the IDs minted by the
+     * backend's `/initiate/` response. Returns the deferred to await. If a
+     * previous bridge is still armed, the previous deferred is completed
+     * with a `Failed` outcome so the abandoned caller doesn't leak —
+     * fail-loud rather than silent overwrite.
      *
      * **No parent Job.** The returned [CompletableDeferred] is created with
      * `parent = null` so it doesn't attach itself to whatever
@@ -73,30 +113,59 @@ internal object UcbResultBridge {
      *      particular call site (the Activity completes it via the
      *      process-static [deliver]); attaching it to the caller's scope
      *      would inherit cancellation semantics we don't want.
+     *
+     * @param externalTransactionId The `external_transaction_id` from the
+     *   `/initiate/` response — baked into [UcbPurchaseOutcome.Completed]
+     *   on a successful PaymentSheet result so the deferred-bridge consumer
+     *   in [com.zerosettle.sdk.ZeroSettle] can hydrate a `CheckoutTransaction`
+     *   without a second round-trip.
+     * @param transactionId Numeric `Transaction.id` (or null when absent).
      */
     @Synchronized
-    fun reserve(): CompletableDeferred<UcbPurchaseOutcome> {
+    fun reserve(
+        externalTransactionId: String,
+        transactionId: Long?,
+    ): CompletableDeferred<UcbPurchaseOutcome> {
         pending?.let { stale ->
             // A previous launch never received its result. Most likely the
             // activity crashed or was force-killed. Complete the stale
             // deferred so the abandoned coroutine resumes (with Failed),
             // then arm a fresh one.
-            stale.complete(UcbPurchaseOutcome.Failed("abandoned: a new UCB checkout was started before the previous one completed"))
+            stale.deferred.complete(
+                UcbPurchaseOutcome.Failed(
+                    "abandoned: a new UCB checkout was started before the previous one completed",
+                ),
+            )
         }
         val fresh = CompletableDeferred<UcbPurchaseOutcome>(parent = null)
-        pending = fresh
+        pending = Pending(
+            deferred = fresh,
+            externalTransactionId = externalTransactionId,
+            transactionId = transactionId,
+        )
         return fresh
     }
 
     /**
-     * Deliver an outcome to whoever is currently awaiting the bridge. No-op
-     * if no one is awaiting — silently absorbs a duplicate-delivery from a
-     * recreated activity (e.g., rotation racing PaymentSheet result).
+     * Deliver a PaymentSheet result. The bridge composes the final
+     * [UcbPurchaseOutcome] using the IDs reserved by the launcher: a
+     * `Completed` status becomes `UcbPurchaseOutcome.Completed(extId, txnId)`,
+     * other statuses pass through. No-op if no one is awaiting — silently
+     * absorbs a duplicate-delivery from a recreated activity (e.g., rotation
+     * racing PaymentSheet result).
      */
     @Synchronized
-    fun deliver(outcome: UcbPurchaseOutcome) {
-        val d = pending ?: return
-        d.complete(outcome)
+    fun deliver(status: PaymentSheetStatus) {
+        val p = pending ?: return
+        val outcome = when (status) {
+            is PaymentSheetStatus.Completed -> UcbPurchaseOutcome.Completed(
+                externalTransactionId = p.externalTransactionId,
+                transactionId = p.transactionId,
+            )
+            is PaymentSheetStatus.Canceled -> UcbPurchaseOutcome.Canceled
+            is PaymentSheetStatus.Failed -> UcbPurchaseOutcome.Failed(status.message)
+        }
+        p.deferred.complete(outcome)
         pending = null
     }
 
@@ -109,14 +178,16 @@ internal object UcbResultBridge {
      */
     @Synchronized
     fun reset() {
-        pending?.complete(UcbPurchaseOutcome.Failed("bridge reset before activity delivered an outcome"))
+        pending?.deferred?.complete(
+            UcbPurchaseOutcome.Failed("bridge reset before activity delivered an outcome"),
+        )
         pending = null
     }
 
     /** Test-only: snapshot the current pending state — DO NOT use in production code. */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     internal fun peekForTest(): UcbPurchaseOutcome? {
-        val d = pending ?: return null
+        val d = pending?.deferred ?: return null
         if (!d.isCompleted) return null
         return runCatching { d.getCompleted() }.getOrNull()
     }

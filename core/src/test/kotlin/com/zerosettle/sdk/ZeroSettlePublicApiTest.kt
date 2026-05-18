@@ -34,6 +34,9 @@ class ZeroSettlePublicApiTest {
     private suspend fun identifyU1() {
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))
+        // Bootstrap also fetches `/v1/iap/play-billing-config/` for UCB.
+        // 404 = endpoint not shipped / not opted in; bootstrap is best-effort.
+        server.enqueue(MockResponse().setResponseCode(404).setBody("not found"))
         ZeroSettle.identify(Identity.User(id = "u1"))
     }
 

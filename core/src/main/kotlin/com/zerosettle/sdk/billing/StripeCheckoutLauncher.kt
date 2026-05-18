@@ -51,19 +51,27 @@ internal class StripeCheckoutLauncher(
     private val isSandbox: Boolean,
     private val merchantDisplayName: String,
     private val logger: ZeroSettleLogger,
+    // Optional sink fired with the final outcome before `launch()` returns.
+    // [PlayBillingCoordinator] wires this so [com.zerosettle.sdk.ZeroSettle]
+    // can resolve its in-flight `pendingPlayPurchaseDeferred` when a UCB
+    // purchase completes/cancels/fails. Defaults to a no-op so tests +
+    // headless callers don't need to wire it.
+    private val onResult: (UcbPurchaseOutcome) -> Unit = {},
 ) : UcbCheckoutLauncher {
 
     override suspend fun launch(token: String, productId: String, userId: String): Result<Unit> {
-        // 1) Reserve the result bridge first. If `/initiate/` then fails, the
-        //    bridge is still cleaned up before we surface — otherwise a stale
-        //    pending deferred would leak into the next purchase.
-        val pending = UcbResultBridge.reserve()
         logger.info("ucb", "StripeCheckoutLauncher.launch token=${token.take(12)}… productId=$productId")
 
-        // 2) POST `/v1/iap/play-ucb/initiate/` with retry on transient errors
+        // 1) POST `/v1/iap/play-ucb/initiate/` with retry on transient errors
         //    (5xx + network). 4xx errors are caller / config issues — retrying
         //    them just delays the failure and wastes the externalTransactionToken
         //    budget on the user's side.
+        //
+        //    The bridge is reserved AFTER `/initiate/` (not before) because
+        //    the response carries the IDs the bridge composes into
+        //    [UcbPurchaseOutcome.Completed]. Reserving earlier would force a
+        //    second mutation just to attach the IDs; this way the reserve is
+        //    a single atomic step right before we dispatch the Intent.
         val initiateResult = retry(MAX_INITIATE_ATTEMPTS, ::isRetryable) {
             backend.initiatePlayUcb(
                 externalTransactionToken = token,
@@ -75,7 +83,6 @@ internal class StripeCheckoutLauncher(
             // Map a 422 `stripe_tax_not_configured` to a typed failure — it's
             // the merchant misconfiguration the dashboard tells you to fix.
             // Other errors flow through unchanged.
-            UcbResultBridge.reset()
             val mapped = if (err is ZeroSettleError.BackendError && err.statusCode == 422 &&
                 err.body.contains("stripe_tax_not_configured")
             ) {
@@ -84,8 +91,21 @@ internal class StripeCheckoutLauncher(
             } else {
                 err
             }
+            // Fan a synthesised failed-outcome to the bridge consumer so
+            // [com.zerosettle.sdk.ZeroSettle.pendingPlayPurchaseDeferred]
+            // resolves even when we never reached the PaymentSheet. The
+            // bridge itself was never reserved on this path, so no reset.
+            onResult(UcbPurchaseOutcome.Failed(mapped.message ?: "checkout_failed"))
             return Result.failure(mapped)
         }
+
+        // 2) Reserve the bridge with the IDs from `/initiate/`. The activity
+        //    will deliver a PaymentSheetStatus and the bridge composes the
+        //    final Completed(extId, txnId) using these reserved IDs.
+        val pending = UcbResultBridge.reserve(
+            externalTransactionId = response.externalTransactionId,
+            transactionId = response.transactionId,
+        )
 
         // 3) Dispatch the Intent. We have no Activity reference here (the
         //    launcher is process-scoped), so FLAG_ACTIVITY_NEW_TASK is
@@ -104,9 +124,11 @@ internal class StripeCheckoutLauncher(
         context.startActivity(intent)
 
         // 4) Await the bridge. The activity completes the deferred at its
-        //    PaymentSheet result callback; we then map the outcome onto a
-        //    Result for the SDK boundary.
+        //    PaymentSheet result callback; we then forward the composed
+        //    outcome (with reserved IDs baked in) to [onResult] and map it
+        //    onto a Result for the SDK boundary.
         val outcome = pending.await()
+        onResult(outcome)
         return when (outcome) {
             is UcbPurchaseOutcome.Completed -> Result.success(Unit)
             is UcbPurchaseOutcome.Canceled -> Result.failure(ZeroSettleError.PurchaseCancelled)

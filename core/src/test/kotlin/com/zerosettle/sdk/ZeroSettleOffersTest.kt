@@ -36,9 +36,14 @@ class ZeroSettleOffersTest {
     private suspend fun identify() {
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))
+        // Bootstrap also fetches `/v1/iap/play-billing-config/` as part of the
+        // UCB phase-2 integration. A 404 leaves the cached UcbConfig at the
+        // disabled default — bootstrap proceeds normally and the SDK falls
+        // back to standard Play Billing.
+        server.enqueue(MockResponse().setResponseCode(404).setBody("not found"))
         ZeroSettle.identify(Identity.User(id = "u1"))
         // Drain the bootstrap requests so subsequent takeRequest() sees the call under test.
-        server.takeRequest(); server.takeRequest()
+        server.takeRequest(); server.takeRequest(); server.takeRequest()
     }
 
     @Test fun offerManager_beforeIdentify_throws() = runTest {

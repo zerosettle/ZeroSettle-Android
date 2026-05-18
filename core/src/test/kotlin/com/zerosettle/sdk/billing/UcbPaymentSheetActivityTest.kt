@@ -56,11 +56,14 @@ class UcbPaymentSheetActivityTest {
         // suspending on the bridge; failing to deliver here would leak the
         // coroutine.
         UcbResultBridge.reset()
-        // Mirror the real launch sequence: reserve the bridge first, then
-        // start the activity. The activity's missing-extras path should
-        // deliver a Failed outcome to the reserved deferred so any awaiting
-        // caller resumes.
-        val pending = UcbResultBridge.reserve()
+        // Mirror the real launch sequence: reserve the bridge first (with
+        // the IDs from /initiate/), then start the activity. The activity's
+        // missing-extras path should deliver a Failed status to the reserved
+        // deferred so any awaiting caller resumes.
+        val pending = UcbResultBridge.reserve(
+            externalTransactionId = "abcdef0123456789",
+            transactionId = 42L,
+        )
         val intent = Intent(
             ApplicationProvider.getApplicationContext(),
             UcbPaymentSheetActivity::class.java,

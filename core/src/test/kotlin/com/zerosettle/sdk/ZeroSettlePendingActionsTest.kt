@@ -32,6 +32,16 @@ class ZeroSettlePendingActionsTest {
 
     @After fun tearDown() { server.shutdown(); ZeroSettle.resetForTesting() }
 
+    /**
+     * Bootstrap fires three HTTP requests after Phase 2 Chunk D: products,
+     * entitlements, AND `/v1/iap/play-billing-config/`. A 404 on the UCB
+     * call leaves the cached config at the disabled default and bootstrap
+     * proceeds normally. Tests that drain requests must drain three.
+     */
+    private fun enqueueUcbConfig404() {
+        server.enqueue(MockResponse().setResponseCode(404).setBody("not found"))
+    }
+
     @Test fun bootstrap_populatesPendingActionsFromEntitlementsResponse() = runTest {
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(
@@ -40,6 +50,7 @@ class ZeroSettlePendingActionsTest {
                    "pending_actions":[{"type":"manual_play_cancel","transaction_id":"t","original_play_purchase_token":"p","expires_at":"x","deep_link":"y","user_message":"m"}]}""",
             ),
         )
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.User(id = "u1"))
         assertThat(ZeroSettle.pendingActions.value).hasSize(1)
         assertThat(ZeroSettle.pendingActions.value.first()).isInstanceOf(PendingAction.ManualPlayCancel::class.java)
@@ -52,6 +63,7 @@ class ZeroSettlePendingActionsTest {
                 """{"entitlements":[],"pending_actions":[{"type":"future_v9","transaction_id":"t","user_message":"m"}]}""",
             ),
         )
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.User(id = "u1"))
         assertThat(ZeroSettle.pendingActions.value).isEmpty()
     }
@@ -63,10 +75,11 @@ class ZeroSettlePendingActionsTest {
                 """{"entitlements":[],"pending_actions":[{"type":"migration_completed_info","transaction_id":"t","play_access_ends_at":"2026-06-01T00:00:00Z","new_subscription_price":{"amount_cents":499,"currency":"USD","billing_interval":"month"},"user_message":"m"}]}""",
             ),
         )
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.User(id = "u1"))
         assertThat(ZeroSettle.pendingActions.value).hasSize(1)
         val action = ZeroSettle.pendingActions.value.first()
-        server.takeRequest(); server.takeRequest()  // drain the bootstrap products + entitlements requests
+        server.takeRequest(); server.takeRequest(); server.takeRequest()  // drain the bootstrap products + entitlements + ucb-config requests
 
         server.enqueue(MockResponse().setResponseCode(204))
         val res = ZeroSettle.dismissPendingAction(action)
@@ -86,9 +99,10 @@ class ZeroSettlePendingActionsTest {
                 """{"entitlements":[],"pending_actions":[{"type":"manual_play_cancel","transaction_id":"t2","original_play_purchase_token":"p","expires_at":"x","deep_link":"y","user_message":"m"}]}""",
             ),
         )
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.User(id = "u1"))
         val action = ZeroSettle.pendingActions.value.first()
-        server.takeRequest(); server.takeRequest()  // drain bootstrap requests
+        server.takeRequest(); server.takeRequest(); server.takeRequest()  // drain bootstrap requests (products + entitlements + ucb-config)
         server.enqueue(MockResponse().setResponseCode(204))
         ZeroSettle.dismissPendingAction(action)
         val body = server.takeRequest().body.readUtf8()

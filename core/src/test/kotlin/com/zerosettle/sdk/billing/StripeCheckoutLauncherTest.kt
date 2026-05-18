@@ -93,13 +93,13 @@ class StripeCheckoutLauncherTest {
      * the suspension-side `pending.await()` returning a Failed outcome via
      * `reset()` at tearDown, rather than as a deadlock.
      */
-    private fun spawnDeliverer(outcome: UcbPurchaseOutcome) {
+    private fun spawnDeliverer(status: PaymentSheetStatus) {
         Thread {
             val deadline = System.currentTimeMillis() + 10_000L
             while (!UcbResultBridge.isReservedForTest() && System.currentTimeMillis() < deadline) {
                 Thread.sleep(2)
             }
-            UcbResultBridge.deliver(outcome)
+            UcbResultBridge.deliver(status)
         }.apply { isDaemon = true }.start()
     }
 
@@ -120,7 +120,7 @@ class StripeCheckoutLauncherTest {
         // Spawn the deliverer first so the launcher's pending.await() returns
         // promptly once the HTTP roundtrip completes and the Intent is
         // dispatched.
-        spawnDeliverer(UcbPurchaseOutcome.Completed)
+        spawnDeliverer(PaymentSheetStatus.Completed)
         val result = launcher.launch(token = "tok-abc", productId = "pro_monthly", userId = "user-7")
 
         // ── HTTP wire-shape ────────────────────────────────────────────────
@@ -164,7 +164,7 @@ class StripeCheckoutLauncherTest {
             ),
         )
         val launcher = newLauncher()
-        spawnDeliverer(UcbPurchaseOutcome.Canceled)
+        spawnDeliverer(PaymentSheetStatus.Canceled)
 
         val r = launcher.launch("tok", "pro", "u")
         assertThat(r.isFailure).isTrue()
@@ -181,7 +181,7 @@ class StripeCheckoutLauncherTest {
             ),
         )
         val launcher = newLauncher()
-        spawnDeliverer(UcbPurchaseOutcome.Failed("card_declined"))
+        spawnDeliverer(PaymentSheetStatus.Failed("card_declined"))
 
         val r = launcher.launch("tok", "pro", "u")
         assertThat(r.isFailure).isTrue()
@@ -222,7 +222,7 @@ class StripeCheckoutLauncherTest {
             ),
         )
         val launcher = newLauncher()
-        spawnDeliverer(UcbPurchaseOutcome.Completed)
+        spawnDeliverer(PaymentSheetStatus.Completed)
 
         val r = launcher.launch("tok", "pro", "u")
 

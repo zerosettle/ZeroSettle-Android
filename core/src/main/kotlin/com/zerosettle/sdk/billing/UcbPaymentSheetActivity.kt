@@ -44,7 +44,7 @@ internal class UcbPaymentSheetActivity : ComponentActivity() {
             // crash + don't leave the bridge hanging — deliver Failed so the
             // launcher's suspending await resumes.
             UcbResultBridge.deliver(
-                UcbPurchaseOutcome.Failed(
+                PaymentSheetStatus.Failed(
                     "UcbPaymentSheetActivity launched without required extras (client_secret/publishable_key)",
                 ),
             )
@@ -89,14 +89,19 @@ internal class UcbPaymentSheetActivity : ComponentActivity() {
     }
 
     private fun onPaymentSheetResult(result: PaymentSheetResult) {
-        val outcome = when (result) {
-            is PaymentSheetResult.Completed -> UcbPurchaseOutcome.Completed
-            is PaymentSheetResult.Canceled -> UcbPurchaseOutcome.Canceled
-            is PaymentSheetResult.Failed -> UcbPurchaseOutcome.Failed(
+        // The activity ONLY knows the PaymentSheet result; the
+        // externalTransactionId + transactionId were reserved on the bridge
+        // by the launcher from the `/initiate/` response. The bridge composes
+        // them into a final [UcbPurchaseOutcome] using the reserved IDs —
+        // see [UcbResultBridge.deliver].
+        val status = when (result) {
+            is PaymentSheetResult.Completed -> PaymentSheetStatus.Completed
+            is PaymentSheetResult.Canceled -> PaymentSheetStatus.Canceled
+            is PaymentSheetResult.Failed -> PaymentSheetStatus.Failed(
                 result.error.message ?: result.error::class.simpleName ?: "payment_failed",
             )
         }
-        UcbResultBridge.deliver(outcome)
+        UcbResultBridge.deliver(status)
         finish()
     }
 

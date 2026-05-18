@@ -49,8 +49,10 @@ class MigrationFlowTest {
     private suspend fun identifyWithPlaySub() {
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody(playEntitlements))
+        // UCB play-billing-config (Phase 2 Chunk D) — best-effort 404 is fine.
+        server.enqueue(MockResponse().setResponseCode(404).setBody("not found"))
         ZeroSettle.identify(Identity.User(id = "u1"))
-        server.takeRequest(); server.takeRequest() // drain bootstrap
+        server.takeRequest(); server.takeRequest(); server.takeRequest() // drain bootstrap (products + entitlements + ucb-config)
     }
 
     private fun eligibleOfferBody() =

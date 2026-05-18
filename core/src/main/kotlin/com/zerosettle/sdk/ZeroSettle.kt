@@ -63,6 +63,8 @@ public object ZeroSettle {
         private set
     @Volatile internal var entitlementPoller: com.zerosettle.sdk.entitlements.EntitlementPoller? = null
         private set
+    @Volatile internal var ucbConfigRepository: com.zerosettle.sdk.billing.UcbConfigRepository? = null
+        private set
 
     internal val scope: ZeroSettleScope = ZeroSettleScope()
 
@@ -99,6 +101,7 @@ public object ZeroSettle {
         playCoordinator = null
         entitlementPoller?.stop()
         entitlementPoller = null
+        ucbConfigRepository = null
         this.appContext = context.applicationContext
         this.config = config
         this.identityStore = IdentityStore(context.applicationContext)
@@ -108,6 +111,7 @@ public object ZeroSettle {
             publishableKey = config.publishableKey,
             sdkVersion = sdkVersion,
         )
+        this.ucbConfigRepository = com.zerosettle.sdk.billing.UcbConfigRepository(this.backend!!)
         this.entitlementPoller = com.zerosettle.sdk.entitlements.EntitlementPoller(
             backend = this.backend!!,
             userIdProvider = { _currentUserId.value },
@@ -125,14 +129,23 @@ public object ZeroSettle {
     /**
      * Construct a [PlayBillingCoordinator][com.zerosettle.sdk.billing.PlayBillingCoordinator]
      * bound to the current [scope] / [backend], or `null` when Play sync is disabled or
-     * the SDK isn't configured. Called from [configure] and re-called from [logout] so a
-     * subsequent [identify] re-enables Play sync against the fresh scope.
+     * the SDK isn't configured. Called from [configure] and re-called from [logout] +
+     * [bootstrap] so a subsequent [identify] / fresh UCB config re-enables Play sync
+     * against the fresh scope.
+     *
+     * **UCB config capture**: The coordinator's `BillingClient` bakes UCB enablement
+     * at construction (`enableUserChoiceBilling` is a builder setter); StateFlow
+     * reactivity isn't useful here. We read [UcbConfigRepository.config]'s current
+     * value snapshot. From [configure] this resolves to [UcbConfig.Disabled] (the
+     * repo's default before [bootstrap] runs `refresh()`); [bootstrap] rebuilds the
+     * coordinator after `refresh()` so the freshly-fetched config takes effect.
      */
     private fun buildPlayCoordinator(): com.zerosettle.sdk.billing.PlayBillingCoordinator? {
         val cfg = config ?: return null
         val ctx = appContext ?: return null
         val be = backend ?: return null
         if (!cfg.syncPlayPurchases) return null
+        val ucbCfg = ucbConfigRepository?.config?.value ?: com.zerosettle.sdk.billing.UcbConfig.Disabled
         return com.zerosettle.sdk.billing.PlayBillingCoordinator(
             context = ctx,
             backend = be,
@@ -163,8 +176,54 @@ public object ZeroSettle {
             // the redelivery-on-relaunch path (no awaiter armed for this purchase).
             onPurchaseSynced = { txnId -> pendingPlayPurchaseDeferred?.complete(txnId) },
             onPurchaseFailed = { err -> pendingPlayPurchaseDeferred?.completeExceptionally(err) },
+            ucbConfig = ucbCfg,
+            ucbCheckoutLauncher = com.zerosettle.sdk.billing.StripeCheckoutLauncher(
+                context = ctx,
+                backend = be,
+                publishableKey = cfg.publishableKey,
+                isSandbox = cfg.isSandbox,
+                merchantDisplayName = DEFAULT_MERCHANT_DISPLAY_NAME,
+                logger = cfg.logger,
+                // UCB completion bridge — when the StripePaymentSheet activity
+                // returns a Completed outcome, resolve any in-flight
+                // [purchaseViaPlayBilling] caller with the backend's numeric
+                // transaction id (toString'd, matching the standard Play-sync
+                // path's wire shape). The webhook subsequently fans the new
+                // entitlement out via the next [restoreEntitlements] / poll;
+                // we don't gate the awaiter on entitlement materialisation —
+                // PaymentSheet success IS the user-visible purchase success.
+                onResult = { outcome ->
+                    when (outcome) {
+                        is com.zerosettle.sdk.billing.UcbPurchaseOutcome.Completed -> {
+                            // Prefer numeric transaction id when present
+                            // (matches the Play-sync wire shape); fall back to
+                            // the external id if the backend ever returns null.
+                            val id = outcome.transactionId?.toString()
+                                ?: outcome.externalTransactionId
+                            pendingPlayPurchaseDeferred?.complete(id)
+                        }
+                        is com.zerosettle.sdk.billing.UcbPurchaseOutcome.Canceled -> {
+                            pendingPlayPurchaseDeferred?.completeExceptionally(
+                                ZeroSettleError.PurchaseCancelled,
+                            )
+                        }
+                        is com.zerosettle.sdk.billing.UcbPurchaseOutcome.Failed -> {
+                            pendingPlayPurchaseDeferred?.completeExceptionally(
+                                ZeroSettleError.CheckoutFailed(outcome.message),
+                            )
+                        }
+                    }
+                },
+            ),
         )
     }
+
+    /**
+     * Display name surfaced inside Stripe's PaymentSheet header. Hardcoded
+     * for now — the per-tenant value will flow in via [UcbConfig] (or a
+     * dedicated branding field) once Phase 3's dashboard ships.
+     */
+    private const val DEFAULT_MERCHANT_DISPLAY_NAME: String = "ZeroSettle"
 
     // ─── Identity ───────────────────────────────────────────────────────────
 
@@ -232,6 +291,37 @@ public object ZeroSettle {
         publishPendingActionsWithEvents(parsePendingActions(entResp.pendingActions))
         _isBootstrapped.value = true
         _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = entResp.entitlements.size))
+
+        // Refresh the tenant's UCB configuration BEFORE building the
+        // PlayBillingCoordinator that will drive purchases. The coordinator's
+        // BillingClient bakes UCB enablement at construction (it's a builder
+        // setter), so a StateFlow-reactive approach isn't viable — we need
+        // the fresh config in hand before we wire the BillingClient.
+        //
+        // Best-effort: a failed fetch (404 from a tenant that hasn't shipped
+        // UCB, or a transient backend hiccup) leaves the cached config at
+        // [UcbConfig.Disabled] so the SDK falls back to standard Play
+        // Billing. Bootstrap still proceeds.
+        ucbConfigRepository?.refresh()?.onFailure {
+            config?.logger?.warn(
+                "ucb",
+                "config fetch failed: ${it.message}; defaulting to disabled",
+            )
+        }
+
+        // Rebuild the coordinator so the fresh UCB config takes effect.
+        // The one configure() built was constructed against the repo's
+        // default `Disabled` value (the fetch hadn't run yet) — it was
+        // never `.start()`ed, so a synchronous swap is safe.
+        val oldCoordinator = playCoordinator
+        playCoordinator = buildPlayCoordinator()
+        // The old coordinator was built but never connected — its BillingClient
+        // has no active connection to tear down. `shutdown()` is idempotent;
+        // run it off-thread so we don't block bootstrap on the no-op
+        // `endConnection()` call (which marshals through Play services
+        // even with no live connection).
+        oldCoordinator?.let { coord -> ioScope.launch { coord.shutdown() } }
+
         playCoordinator?.start()
         entitlementPoller?.start(scope.scope)
         return Result.success(products)
@@ -1116,6 +1206,7 @@ public object ZeroSettle {
         entitlementPoller = null
         playCoordinator?.let { coord -> runBlocking { coord.shutdown() } }
         playCoordinator = null
+        ucbConfigRepository = null
         offerDismissalStore = null
         appContext = null
         config = null

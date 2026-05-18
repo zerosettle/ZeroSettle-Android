@@ -37,9 +37,20 @@ class ZeroSettleIdentifyTest {
         ZeroSettle.resetForTesting()
     }
 
+    /**
+     * Bootstrap (Phase 2 Chunk D) fetches `/v1/iap/play-billing-config/` after
+     * products + entitlements. A 404 leaves the cached `UcbConfig` at the
+     * disabled default; bootstrap proceeds normally. Tests that exercise the
+     * bootstrap pipeline must enqueue this third response in order.
+     */
+    private fun enqueueUcbConfig404() {
+        server.enqueue(MockResponse().setResponseCode(404).setBody("not found"))
+    }
+
     @Test fun identify_user_fetchesProductsAndSetsBootstrapped() = runTest {
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))
+        enqueueUcbConfig404()
         val res = ZeroSettle.identify(Identity.User(id = "u1"))
         assertThat(res.isSuccess).isTrue()
         assertThat(ZeroSettle.isBootstrapped.value).isTrue()
@@ -49,10 +60,12 @@ class ZeroSettleIdentifyTest {
     @Test fun identify_anonymous_generatesStableUuid() = runTest {
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.Anonymous)
         val first = ZeroSettle.activeUserIdForTesting()
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.Anonymous)
         val second = ZeroSettle.activeUserIdForTesting()
         assertThat(first).isNotNull()
@@ -74,6 +87,7 @@ class ZeroSettleIdentifyTest {
         }
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.User(id = "u1"))
         assertThat(collected).contains(ZeroSettleEvent.EntitlementsRefreshed(count = 0))
         job.cancel()
@@ -87,6 +101,7 @@ class ZeroSettleIdentifyTest {
     @Test fun logout_clearsState() = runTest {
         server.enqueue(MockResponse().setBody("""{"products":[]}"""))
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))
+        enqueueUcbConfig404()
         ZeroSettle.identify(Identity.User(id = "u1"))
         ZeroSettle.setCustomer(name = "Alice", email = "a@x")
         ZeroSettle.logout()
