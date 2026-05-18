@@ -27,7 +27,7 @@ harness with ~24 Compose screens backed by a proper habit-tracking domain layer.
 
 **Debug harness** — the former 7-tab SDK harness is preserved under
 **Settings → Developer**. It is always visible in debug builds. In release builds it is
-hidden behind a 7-tap gesture on the Settings screen.
+hidden behind a 7-tap gesture on the app-version line of the Account card in Settings.
 
 ## Setup
 
