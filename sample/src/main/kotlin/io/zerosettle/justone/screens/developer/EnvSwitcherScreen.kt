@@ -43,7 +43,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun EnvSwitcherScreen(onIdentified: () -> Unit) {
     val ctx = LocalContext.current
-    var userId by remember { mutableStateOf(SampleConfig.TEST_USER_ID) }
+    var userId by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("Sample User") }
     var email by remember { mutableStateOf("sample@example.com") }
     var status by remember { mutableStateOf("Not identified yet.") }

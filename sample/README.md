@@ -6,14 +6,12 @@ purchase / SDK plumbing).
 
 ## Setup
 
-1. Edit `sample/src/main/kotlin/com/zerosettle/sample/SampleConfig.kt`:
+1. Edit `sample/src/main/kotlin/io/zerosettle/justone/SampleConfig.kt`:
    - `PUBLISHABLE_KEY` — a sandbox key (`zs_pk_test_…`) from the ZeroSettle dashboard.
      Ships as the clearly-marked placeholder `zs_pk_test_REPLACE_ME` (backend calls 401
      until replaced).
-   - `TEST_USER_ID` — any non-empty string; prefills the Sign-in screen's user-id field.
-   - `BASE_URL_OVERRIDE` — set to your local backend / ngrok tunnel for dev, else leave
-     `null`. (Note: `ZeroSettleConfig` is immutable; the Debug screen *displays* this
-     value but can't change it at runtime — edit `SampleConfig` + reinstall.)
+   - Backend environment (production / staging / local / custom) is chosen at runtime
+     via the Developer → Env Switcher screen and persisted across launches.
 2. For the **native Play Billing** demo: register the products in a Play Console app you
    own, mark your test account as a license tester, and install the sample from an
    internal-test track build. (Web checkout works without Play Console setup.)

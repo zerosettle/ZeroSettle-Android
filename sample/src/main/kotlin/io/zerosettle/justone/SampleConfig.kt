@@ -13,7 +13,6 @@ import com.zerosettle.sdk.Identity
  */
 internal object SampleConfig {
     const val PUBLISHABLE_KEY = "zs_pk_test_55cc0bdc80d2a3274238e00f74ca78f668e83f0ad8a46b48"
-    const val TEST_USER_ID = "sample-user-1"
 
     /**
      * Backend environments selectable from the Sign-in screen.
