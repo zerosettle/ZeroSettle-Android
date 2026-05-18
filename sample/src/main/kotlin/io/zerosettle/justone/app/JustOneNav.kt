@@ -9,6 +9,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import io.zerosettle.justone.screens.auth.CreateUserScreen
 import io.zerosettle.justone.screens.habit.AddHabitScreen
+import io.zerosettle.justone.screens.habit.HabitDetailScreen
 import io.zerosettle.justone.screens.home.HomeScreen
 
 object Routes {
@@ -46,7 +47,10 @@ fun JustOneNav(nav: NavHostController, startDestination: String) {
         composable(
             Routes.HABIT_DETAIL,
             arguments = listOf(navArgument("habitId") { type = NavType.StringType }),
-        ) { Text(Routes.HABIT_DETAIL) }
+        ) { backStackEntry ->
+            val habitId = backStackEntry.arguments?.getString("habitId").orEmpty()
+            HabitDetailScreen(habitId = habitId, onBack = { nav.popBackStack() })
+        }
         composable(Routes.ADD_HABIT) {
             AddHabitScreen(onAdded = { nav.popBackStack() }, onCancel = { nav.popBackStack() })
         }
