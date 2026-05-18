@@ -145,6 +145,12 @@ public object ZeroSettle {
             },
             customerNameProvider = { customerName },
             customerEmailProvider = { customerEmail },
+            // Routes purchase finalize between consume (consumables) and
+            // acknowledge (everything else). Backend `reference_id` is
+            // server-normalized to lowercase and Play `Purchase.products[0]`
+            // is the Play Console product id (lowercase by Play requirement),
+            // so exact `==` is correct here — no case-insensitive lookup.
+            productTypeLookup = { pid -> _products.value.firstOrNull { it.id == pid }?.type },
             onEntitlementsMayHaveChanged = {
                 scope.scope.launch { restoreEntitlements() }
                 entitlementPoller?.pollNow()

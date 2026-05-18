@@ -7,28 +7,36 @@ import com.zerosettle.sdk.models.ZeroSettleError
 
 /**
  * Drives a Play purchase through: sync to `POST /v1/iap/play-store-transactions/` →
- * (on `owned=true`) acknowledge via the Billing library → (on backend failure)
- * enqueue to [PlaySyncQueue], leaving the purchase unacknowledged so Play redelivers.
+ * (on `owned=true`) finalize via the Billing library → (on backend failure)
+ * enqueue to [PlaySyncQueue], leaving the purchase un-finalized so Play redelivers.
  *
- * Acknowledgement ordering matters: Apple's `transaction.finish()` has no consequence
+ * Finalization ordering matters: Apple's `transaction.finish()` has no consequence
  * if skipped, but Play **auto-refunds** an unacknowledged purchase after 3 days. So:
  *
- *  - Backend confirms (`owned=true`) → acknowledge immediately.
- *  - Backend fails (5xx / timeout) → DO NOT acknowledge; enqueue; Play redelivers.
+ *  - Backend confirms (`owned=true`) → finalize immediately.
+ *  - Backend fails (5xx / timeout) → DO NOT finalize; enqueue; Play redelivers.
  *  - In [retryQueued], if a queued purchase has been failing for >24h and
- *    [strictAck] is false (default), the SDK acknowledges **defensively** — the user
+ *    [strictAck] is false (default), the SDK finalizes **defensively** — the user
  *    did pay Google, so the purchase is almost certainly valid; the SDK keeps trying
- *    to sync. If [strictAck] is true, the SDK never acks without backend validation
+ *    to sync. If [strictAck] is true, the SDK never finalizes without backend validation
  *    (Play auto-refunds; user gets their money back, no entitlement).
- *  - `owned=false` / `conflict=true` → DO NOT acknowledge; surface a [PendingClaim].
+ *  - `owned=false` / `conflict=true` → DO NOT finalize; surface a [PendingClaim].
  *
- * Pure constructor injection (no Android types) for testability. [acknowledge] is
- * `PlayBillingManager::acknowledge`; [onConflictClaim] publishes to `ZeroSettle.pendingClaims`.
+ * The [finalize] callback is product-type-aware: consumables go through
+ * `BillingClient.consumeAsync` (acknowledges AND releases the SKU so the user can
+ * buy it again — leaving a consumable merely acknowledged traps the user in
+ * `ITEM_ALREADY_OWNED` on the next purchase attempt), while non-consumables and
+ * subscriptions go through `BillingClient.acknowledgePurchase`. The routing
+ * decision lives in [PlayBillingCoordinator] which constructs this processor.
+ *
+ * Pure constructor injection (no Android types) for testability. [finalize] is
+ * wired to a closure over `PlayBillingManager::acknowledge` / `::consume`;
+ * [onConflictClaim] publishes to `ZeroSettle.pendingClaims`.
  */
 internal class PurchaseSyncProcessor(
     private val backend: Backend,
     private val queue: PlaySyncQueue,
-    private val acknowledge: suspend (purchaseToken: String) -> Result<Unit>,
+    private val finalize: suspend (productId: String, purchaseToken: String) -> Result<Unit>,
     private val emitEvent: (ZeroSettleEvent) -> Unit,
     private val onConflictClaim: (PendingClaim) -> Unit = {},
     // ─── Deferred-bridge callbacks (Task A3) ─────────────────────────────────
@@ -106,7 +114,7 @@ internal class PurchaseSyncProcessor(
                     onPurchaseFailed(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
                 }
                 emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = d.productId, transactionId = txnId))
-                if (!d.isAcknowledged) runCatching { acknowledge(d.purchaseToken) }
+                if (!d.isAcknowledged) runCatching { finalize(d.productId, d.purchaseToken) }
                 Result.success(Unit)
             }
             resp.conflict && resp.claimAvailable -> {
@@ -135,7 +143,7 @@ internal class PurchaseSyncProcessor(
                 if (!strictAck && row.lastAttemptAtMillis != null &&
                     nowMillis() - row.lastAttemptAtMillis >= DEFENSIVE_ACK_WINDOW_MILLIS
                 ) {
-                    acknowledge(row.purchaseToken) // defensive ack; keep the row so we keep trying to sync
+                    finalize(row.productId, row.purchaseToken) // defensive finalize; keep the row so we keep trying to sync
                 }
                 emitEvent(ZeroSettleEvent.SyncFailed(purchaseToken = row.purchaseToken, attempts = row.attemptCount, terminal = true))
                 continue
@@ -152,7 +160,7 @@ internal class PurchaseSyncProcessor(
             syncRes.fold(
                 onSuccess = { resp ->
                     if (resp.owned) {
-                        acknowledge(row.purchaseToken)
+                        finalize(row.productId, row.purchaseToken)
                         queue.remove(row.purchaseToken)
                         emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = row.productId, transactionId = resp.transactionId ?: ""))
                     } else {

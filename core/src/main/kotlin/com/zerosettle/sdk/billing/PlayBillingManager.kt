@@ -7,6 +7,7 @@ import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.ConsumeParams
 import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
@@ -14,6 +15,7 @@ import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
 import com.android.billingclient.api.acknowledgePurchase
+import com.android.billingclient.api.consumePurchase
 import com.android.billingclient.api.queryProductDetails
 import com.android.billingclient.api.queryPurchasesAsync
 import com.zerosettle.sdk.core.ZeroSettleLogger
@@ -25,11 +27,12 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * Owns the [BillingClient]: connection lifecycle (with auto-reconnect),
  * `queryProductDetails`, `launchBillingFlow` (with the deterministic
  * `obfuscatedAccountId`), the [PurchasesUpdatedListener], `acknowledgePurchase`,
- * and `queryPurchasesAsync` (used by [SubscriptionReconciler]).
+ * `consumeAsync`, and `queryPurchasesAsync` (used by [SubscriptionReconciler]).
  *
  * Purchases observed via the listener (and via reconcile) are handed to
- * [onPurchases]; the SDK wires that to [PurchaseSyncProcessor]. Acknowledgement is
- * NOT done here automatically — the processor calls [acknowledge] only after backend
+ * [onPurchases]; the SDK wires that to [PurchaseSyncProcessor]. Finalization is
+ * NOT done here automatically — the processor calls [acknowledge] or [consume]
+ * (routed by product type in [PlayBillingCoordinator]) only after backend
  * confirmation (3-day-window rule, see [PurchaseSyncProcessor]).
  */
 public class PlayBillingManager(
@@ -111,6 +114,28 @@ public class PlayBillingManager(
         )
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) Result.success(Unit)
         else Result.failure(mapBillingError(result.responseCode, result.debugMessage))
+    }
+
+    /**
+     * Consume a one-time CONSUMABLE purchase via [BillingClient.consumeAsync].
+     *
+     * `consume` is BOTH an acknowledgement (satisfies Play's 3-day window rule)
+     * AND marks the purchase consumed, releasing the product so the user can
+     * buy it again. Without it Play returns
+     * [BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED] on every
+     * subsequent purchase attempt for the same consumable SKU.
+     *
+     * Only [com.zerosettle.sdk.models.ProductType.CONSUMABLE] goes through here;
+     * non-consumables and subscriptions go through [acknowledge]. The routing
+     * lives in [PlayBillingCoordinator.isConsumable].
+     */
+    public suspend fun consume(purchaseToken: String): Result<Unit> {
+        ensureConnected().getOrElse { return Result.failure(it) }
+        val res = client.consumePurchase(
+            ConsumeParams.newBuilder().setPurchaseToken(purchaseToken).build(),
+        )
+        return if (res.billingResult.responseCode == BillingClient.BillingResponseCode.OK) Result.success(Unit)
+        else Result.failure(mapBillingError(res.billingResult.responseCode, res.billingResult.debugMessage))
     }
 
     /** Query all current purchases of [productType] (SUBS / INAPP). Used by the reconciler. */

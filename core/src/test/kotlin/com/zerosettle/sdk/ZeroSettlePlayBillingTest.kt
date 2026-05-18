@@ -181,8 +181,8 @@ class ZeroSettlePlayBillingTest {
         val deferred = kotlinx.coroutines.CompletableDeferred<String>()
         val proc = com.zerosettle.sdk.billing.PurchaseSyncProcessor(
             backend = backend, queue = queue,
-            // Acknowledge throws — the very regression Issue 1 is about.
-            acknowledge = { throw RuntimeException("acknowledge boom (simulated)") },
+            // Finalize throws — the very regression Issue 1 is about.
+            finalize = { _, _ -> throw RuntimeException("finalize boom (simulated)") },
             emitEvent = { },
             onPurchaseSynced = { txnId -> deferred.complete(txnId) },
             onPurchaseFailed = { err -> deferred.completeExceptionally(err) },

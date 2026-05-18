@@ -26,7 +26,7 @@ class PurchaseSyncProcessorTest {
     private fun makeProcessor(strictAck: Boolean = false) = PurchaseSyncProcessor(
         backend = backend,
         queue = queue,
-        acknowledge = { token -> acked += token; Result.success(Unit) },
+        finalize = { _, token -> acked += token; Result.success(Unit) },
         emitEvent = { },
         onPurchaseSynced = { txnId -> resolvedTransactionIds += txnId },
         onPurchaseFailed = { err -> resolvedExceptions += err },
@@ -75,7 +75,7 @@ class PurchaseSyncProcessorTest {
         var claimSeen: com.zerosettle.sdk.models.PendingClaim? = null
         val proc = PurchaseSyncProcessor(
             backend = backend, queue = queue,
-            acknowledge = { Result.success(Unit) }, emitEvent = { },
+            finalize = { _, _ -> Result.success(Unit) }, emitEvent = { },
             onConflictClaim = { claimSeen = it }, strictAck = false, nowMillis = { 0L },
         )
         proc.process(descriptor())
@@ -160,7 +160,7 @@ class PurchaseSyncProcessorTest {
         server.enqueue(MockResponse().setResponseCode(500))
         val proc = PurchaseSyncProcessor(
             backend = backend, queue = queue,
-            acknowledge = { token -> acked += token; Result.success(Unit) }, emitEvent = { },
+            finalize = { _, token -> acked += token; Result.success(Unit) }, emitEvent = { },
             strictAck = false, nowMillis = { day + 60 * 60 * 1000L },
         )
         proc.retryQueued()
@@ -174,7 +174,7 @@ class PurchaseSyncProcessorTest {
         server.enqueue(MockResponse().setResponseCode(500))
         val proc = PurchaseSyncProcessor(
             backend = backend, queue = queue,
-            acknowledge = { token -> acked += token; Result.success(Unit) }, emitEvent = { },
+            finalize = { _, token -> acked += token; Result.success(Unit) }, emitEvent = { },
             strictAck = true, nowMillis = { day + 60 * 60 * 1000L },
         )
         proc.retryQueued()

@@ -38,7 +38,7 @@ class PurchaseSyncFlowTest {
 
     private fun processor(now: () -> Long = { 0L }) = PurchaseSyncProcessor(
         backend = backend, queue = queue,
-        acknowledge = { token -> acked += token; Result.success(Unit) }, emitEvent = { },
+        finalize = { _, token -> acked += token; Result.success(Unit) }, emitEvent = { },
         strictAck = false, nowMillis = now,
     )
 

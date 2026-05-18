@@ -38,6 +38,25 @@ internal fun playBillingProductType(product: Product): String = when (product.ty
 }
 
 /**
+ * Decide whether a finalized purchase should go through Play's
+ * `consumeAsync` (consumable — releases the SKU so the user can buy it again)
+ * or `acknowledgePurchase` (non-consumables and subscriptions — 3-day-window
+ * mark-as-processed).
+ *
+ * Returns `true` ONLY for [ProductType.CONSUMABLE]. Unknown product IDs
+ * (catalog miss) fall through to acknowledge — the safe default, since
+ * acknowledge is a no-op on an already-acknowledged purchase, while
+ * consuming a non-consumable would be destructive.
+ *
+ * Top-level by design so it's unit-testable without Android context. See
+ * [com.zerosettle.sdk.billing.PurchaseFinalizeRoutingTest].
+ */
+internal fun isConsumable(
+    productId: String,
+    productTypeLookup: (productId: String) -> ProductType?,
+): Boolean = productTypeLookup(productId) == ProductType.CONSUMABLE
+
+/**
  * Glue between [ZeroSettle][com.zerosettle.sdk.ZeroSettle] and the Play Billing layer.
  * Created at `configure()` when `syncPlayPurchases` is true; the queue is cleared and
  * the connection ended on `logout()` ([shutdown]).
@@ -58,6 +77,13 @@ internal class PlayBillingCoordinator(
     private val obfuscatedAccountIdProvider: () -> String?,
     private val customerNameProvider: () -> String?,
     private val customerEmailProvider: () -> String?,
+    // Resolves a Play product id to its canonical [ProductType] from the SDK
+    // catalog. Used by [isConsumable] to route purchase finalization between
+    // `consume` (consumables) and `acknowledge` (everything else). The
+    // catalog is loaded post-bootstrap, so lookups may return `null` for
+    // queue-drained purchases from a prior session — that's the
+    // safe-default-acknowledge branch.
+    private val productTypeLookup: (productId: String) -> ProductType?,
     private val onEntitlementsMayHaveChanged: () -> Unit,
     private val onPendingClaim: (PendingClaim) -> Unit,
     private val emitEvent: (ZeroSettleEvent) -> Unit,
@@ -79,7 +105,10 @@ internal class PlayBillingCoordinator(
 
     private val processor = PurchaseSyncProcessor(
         backend = backend, queue = queue,
-        acknowledge = { token -> billing.acknowledge(token) },
+        finalize = { productId, token ->
+            if (isConsumable(productId, productTypeLookup)) billing.consume(token)
+            else billing.acknowledge(token)
+        },
         emitEvent = emitEvent, onConflictClaim = onPendingClaim,
         onPurchaseSynced = onPurchaseSynced, onPurchaseFailed = onPurchaseFailed,
         strictAck = strictAck,
