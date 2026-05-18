@@ -7,6 +7,7 @@
          own manifest merge, but we keep the explicit declaration so the
          requirement is visible to anyone reading the sample. -->
     <uses-permission android:name="com.android.vending.BILLING" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:name=".SampleApplication"
         android:label="ZeroSettle Sample"
