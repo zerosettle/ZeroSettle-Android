@@ -14,7 +14,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -28,11 +32,14 @@ import kotlinx.coroutines.launch
 fun AccountCard(
     onSignedOut: () -> Unit,
     onVersionTap: () -> Unit = {},
+    onRevealDeveloper: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val userId by ZeroSettle.currentUserId.collectAsState()
+    var tapCount by remember { mutableIntStateOf(0) }
+    var lastTap by remember { mutableLongStateOf(0L) }
 
     Card(modifier = modifier.fillMaxWidth()) {
         Column(
@@ -59,12 +66,21 @@ fun AccountCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Tapping the version line is a hidden developer entry point (wired in a later task).
+            // Tapping the version line 7 rapid times reveals the hidden Developer entry.
             Text(
                 text = "Version ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable(onClick = onVersionTap),
+                modifier = Modifier.clickable {
+                    onVersionTap()
+                    val now = System.currentTimeMillis()
+                    tapCount = if (now - lastTap < 600) tapCount + 1 else 1
+                    lastTap = now
+                    if (tapCount >= 7) {
+                        tapCount = 0
+                        onRevealDeveloper()
+                    }
+                },
             )
 
             Spacer(modifier = Modifier.height(16.dp))
