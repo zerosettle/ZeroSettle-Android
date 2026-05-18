@@ -49,6 +49,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     api(libs.billing.ktx)
+    implementation(libs.stripe)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.activity.ktx)

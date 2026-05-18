@@ -1,5 +1,6 @@
 package com.zerosettle.sdk.core
 
+import com.zerosettle.sdk.billing.UcbConfig
 import com.zerosettle.sdk.models.Entitlement
 import com.zerosettle.sdk.models.PendingClaim
 import com.zerosettle.sdk.models.ProductCatalog
@@ -31,6 +32,15 @@ internal class Backend(
     suspend fun fetchProducts(userId: String): Result<ProductCatalog> =
         http.get("/v1/iap/products/?user_id=${enc(userId)}")
             .mapDecode(ProductCatalog.serializer())
+
+    /**
+     * `GET /v1/iap/play-billing-config/` — tenant-level UCB configuration. Fetched
+     * once at SDK bootstrap and cached in [com.zerosettle.sdk.billing.UcbConfigRepository].
+     * Returns [UcbConfig.Disabled]-equivalent defaults if a tenant hasn't opted in.
+     */
+    suspend fun fetchUcbConfig(): Result<UcbConfig> =
+        http.get("/v1/iap/play-billing-config/")
+            .mapDecode(UcbConfig.serializer())
 
     /**
      * `GET /v1/iap/entitlements/?user_id=…` — active entitlements plus the raw
