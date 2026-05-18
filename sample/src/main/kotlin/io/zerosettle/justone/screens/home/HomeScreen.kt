@@ -59,6 +59,11 @@ fun HomeScreen(
     val pendingActions by ZeroSettle.pendingActions.collectAsState()
     val isPremium = entitlements.any { it.isActive && it.productType != "consumable" }
     val scope = rememberCoroutineScope()
+    // On a returning-user cold launch, HOME composes before the async identify
+    // replay resolves. OfferHolder.get() -> ZeroSettle.offerManager() throws
+    // UserNotIdentified while currentUserId is null, so the OfferTip + CheckoutHost
+    // surfaces must be gated until identify completes — recomposition then mounts them.
+    val currentUserId by ZeroSettle.currentUserId.collectAsState()
 
     // Single wide-range flow feeds the aggregated heatmap across all habits.
     val allCompletions by Db.get(ctx).completionDao()
@@ -116,11 +121,14 @@ fun HomeScreen(
                     )
                 }
 
-                item {
-                    ZeroSettleOfferTip(
-                        offerManager = OfferHolder.get(),
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
+                // Gated: OfferHolder.get() throws while currentUserId is null.
+                if (currentUserId != null) {
+                    item {
+                        ZeroSettleOfferTip(
+                            offerManager = OfferHolder.get(),
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
+                    }
                 }
 
                 item {
@@ -154,7 +162,10 @@ fun HomeScreen(
                 }
             }
 
-            ZeroSettleCheckoutHost(offerManager = OfferHolder.get())
+            // Gated: OfferHolder.get() throws while currentUserId is null.
+            if (currentUserId != null) {
+                ZeroSettleCheckoutHost(offerManager = OfferHolder.get())
+            }
         }
     }
 }
