@@ -48,6 +48,7 @@ import java.time.LocalDate
 fun HomeScreen(
     onOpenHabit: (String) -> Unit,
     onAddHabit: () -> Unit,
+    onShowUpsell: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -78,7 +79,15 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddHabit) {
+            FloatingActionButton(
+                onClick = {
+                    scope.launch {
+                        val count = Db.get(ctx).habitDao().count()
+                        if (count >= 3 && !isPremium) onShowUpsell()
+                        else onAddHabit()
+                    }
+                },
+            ) {
                 Icon(Icons.Filled.Add, contentDescription = "Add habit")
             }
         },

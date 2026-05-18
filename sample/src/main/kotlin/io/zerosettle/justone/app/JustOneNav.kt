@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import io.zerosettle.justone.screens.auth.CreateUserScreen
+import io.zerosettle.justone.screens.habit.AddHabitScreen
 import io.zerosettle.justone.screens.home.HomeScreen
 
 object Routes {
@@ -38,6 +39,7 @@ fun JustOneNav(nav: NavHostController, startDestination: String) {
             HomeScreen(
                 onOpenHabit = { nav.navigate(Routes.habitDetail(it)) },
                 onAddHabit = { nav.navigate(Routes.ADD_HABIT) },
+                onShowUpsell = { nav.navigate(Routes.PREMIUM_UPSELL) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
             )
         }
@@ -45,7 +47,9 @@ fun JustOneNav(nav: NavHostController, startDestination: String) {
             Routes.HABIT_DETAIL,
             arguments = listOf(navArgument("habitId") { type = NavType.StringType }),
         ) { Text(Routes.HABIT_DETAIL) }
-        composable(Routes.ADD_HABIT) { Text(Routes.ADD_HABIT) }
+        composable(Routes.ADD_HABIT) {
+            AddHabitScreen(onAdded = { nav.popBackStack() }, onCancel = { nav.popBackStack() })
+        }
         composable(Routes.LAUNCH_PAYWALL) { Text(Routes.LAUNCH_PAYWALL) }
         composable(Routes.PREMIUM_UPSELL) { Text(Routes.PREMIUM_UPSELL) }
         composable(Routes.SETTINGS) { Text(Routes.SETTINGS) }
