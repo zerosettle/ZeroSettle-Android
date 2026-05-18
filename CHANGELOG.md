@@ -1,5 +1,39 @@
 # Changelog
 
+## v2.0.0 — JustOne sample app — 2026-05-18
+
+### Sample app (`:sample` module only — no SDK API changes)
+
+The `:sample` module has been rebuilt from a 7-tab SDK debug harness into **JustOne**,
+a functional habit-tracker reference app (~24 Compose screens) demonstrating a realistic
+ZeroSettle SDK integration. The former debug harness is preserved under
+**Settings → Developer** (always visible in debug builds; gated by a 7-tap gesture in
+release builds).
+
+**Domain layer** (habit-tracker — no SDK dependency): Room database (`Habit`,
+`Completion`, DAOs, `AppDatabase`), DataStore (`UserPrefs`), WorkManager EOD reminders,
+pure `HabitCalc` functions (unit-tested via `HabitCalcTest` — 9 methods).
+
+**SDK surfaces exercised:**
+- *Identity* — `identify()`, `logout()`, `currentUserId`
+- *Catalog* — `products()`, `product()`
+- *Purchase* — `purchase()` (web checkout / Custom Tab), `purchaseViaPlayBilling()`
+- *Entitlements* — `entitlements`, `hasActiveEntitlement()`, `restoreEntitlements()`
+- *Subscription management* — `cancelSubscription()`, `pauseSubscription()`,
+  `resumeSubscription()`, `acceptSaveOffer()`, `fetchCancelFlowConfig()`
+- *Upgrade* — `fetchUpgradeOfferConfig()`
+- *Offers* — `offerManager`, `ZeroSettleOfferTip`, `ZeroSettleCheckoutHost`
+- *Pending actions* — `pendingActions`, `dismissPendingAction()`,
+  `transferPlayOwnershipToCurrentUser()`, `ZeroSettlePendingActionBanner`
+- *Cancel flow UI* — `ZeroSettleCancelFlow`
+
+**Deferred / not exercised** (APIs not present on the Android SDK):
+`trackEvent`, `CheckoutSheet.warmUp`/`warmUpAll` (substituted by the `preloadCheckout`
+config flag), `isWebCheckoutEnabled`, `newConsumableEntitlements`, `entitlementUpdates`,
+`submitCancelFlowResponse`.
+
+---
+
 ## v1.0.0 (in-place edits, untagged) — Flutter Android Parity Prerequisites — 2026-05-12
 
 Six small edits to v1.0.0 on `main` (untagged, in-place — v1.0.0 was never tagged/released).

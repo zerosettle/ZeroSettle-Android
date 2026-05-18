@@ -1,41 +1,77 @@
-# ZeroSettle Android Sample
+# JustOne — ZeroSettle Android Sample
 
-A multi-screen Compose test harness exercising every v1.0 SDK flow. Modeled on the
-iOS `JustOne` test app's ZeroSettle integration surface (no habit-tracking — just the
-purchase / SDK plumbing).
+**JustOne** is a functional habit-tracker reference app that demonstrates how to integrate
+the ZeroSettle Android SDK into a real application. It replaces the former 7-tab SDK debug
+harness with ~24 Compose screens backed by a proper habit-tracking domain layer.
+
+## What's in the app
+
+**Habit-tracker domain** (Room / DataStore / WorkManager):
+- `Habit` + `Completion` entities, DAOs, and `AppDatabase`
+- `UserPrefs` (DataStore) — stores the user's ZeroSettle identity and preferences
+- WorkManager EOD reminder notifications
+- Pure `HabitCalc` functions (unit-tested — see `HabitCalcTest`)
+
+**ZeroSettle SDK surfaces exercised:**
+- Identity: `identify()`, `logout()`, `currentUserId`
+- Catalog: `products()`, `product()`
+- Purchase: `purchase()` (web checkout / Custom Tab), `purchaseViaPlayBilling()`
+- Entitlements: `entitlements`, `hasActiveEntitlement()`, `restoreEntitlements()`
+- Subscription management: `cancelSubscription()`, `pauseSubscription()`,
+  `resumeSubscription()`, `acceptSaveOffer()`, `fetchCancelFlowConfig()`
+- Upgrade: `fetchUpgradeOfferConfig()`
+- Offers: `offerManager`, `ZeroSettleOfferTip`, `ZeroSettleCheckoutHost`
+- Pending actions: `pendingActions`, `dismissPendingAction()`,
+  `transferPlayOwnershipToCurrentUser()`, `ZeroSettlePendingActionBanner`
+- Cancel flow UI: `ZeroSettleCancelFlow`
+
+**Debug harness** — the former 7-tab SDK harness is preserved under
+**Settings → Developer**. It is always visible in debug builds. In release builds it is
+hidden behind a 7-tap gesture on the Settings screen.
 
 ## Setup
 
 1. Edit `sample/src/main/kotlin/io/zerosettle/justone/SampleConfig.kt`:
    - `PUBLISHABLE_KEY` — a sandbox key (`zs_pk_test_…`) from the ZeroSettle dashboard.
-     Ships as the clearly-marked placeholder `zs_pk_test_REPLACE_ME` (backend calls 401
-     until replaced).
+     Ships as the clearly-marked placeholder `zs_pk_test_REPLACE_ME` (backend calls return
+     401 until replaced).
    - Backend environment (production / staging / local / custom) is chosen at runtime
-     via the Developer → Env Switcher screen and persisted across launches.
+     via **Settings → Developer → Env Switcher** and persisted across launches.
 2. For the **native Play Billing** demo: register the products in a Play Console app you
    own, mark your test account as a license tester, and install the sample from an
    internal-test track build. (Web checkout works without Play Console setup.)
-3. Run: `./gradlew :sample:installDebug`.
+3. If you are working against an unreleased SDK commit, publish the local SDK artifacts
+   first so Gradle picks them up:
+   ```bash
+   ./gradlew :core:publishToMavenLocal :ui:publishToMavenLocal
+   ```
+4. Run: `./gradlew :sample:installDebug`
 
-## Screens (bottom-nav)
+## Running tests
 
-| Screen | JustOne reference | What it does |
-|---|---|---|
-| **Sign in** | `LoginView` | user-id text field → `identify(Identity.User(...))` / `Identity.Anonymous`; logout; shows configured/bootstrapped state. Navigates to Home on success. |
-| **Home / Paywall** | `LaunchPaywallView` + home premium gate | premium gate via `activeEntitlements`; product cards with "Buy — Web" (`purchase()`) / "Buy — Google Play" (`purchaseViaPlayBilling()`); embeds `ZeroSettleOfferTip` + `ZeroSettleCheckoutHost` bound to the shared `OfferManager`. |
-| **Entitlements** | settings `SubscriptionCardView` | `restoreEntitlements()` + render `entitlements` (source/status/renewal/expiry/trial/pause) + `pendingClaims` with a Claim button (`transferPlayOwnershipToCurrentUser`). |
-| **Offers** | `PrivateOfferDemoView` | explicit `offerManager.evaluate()`; raw `OfferState` + `OfferData` dump; `ZeroSettleOfferTip` + `ZeroSettleCheckoutHost`; direct Accept/Dismiss/Re-evaluate buttons; surfaces `checkoutError`. |
-| **Pending** | (Android-only `PendingAction` API) | renders every `pendingActions` entry via `ZeroSettlePendingActionBanner`; `onDeepLink` → `ACTION_VIEW`, `onDismiss` → `dismissPendingAction` (info banners only). |
-| **Cancel** | `CancelFlowView` + `CancelFlow/*` | "Start cancel flow" → `fetchCancelFlowConfig()` → `ZeroSettleCancelFlow`; result routed to `acceptSaveOffer` / `pauseSubscription` / `cancelSubscription`. Plus raw Cancel/Pause/Resume buttons. |
-| **Upgrade** | `PremiumUpsellView` + settings `OfferCardView` | "Check upgrade offer" → `fetchUpgradeOfferConfig()` → `ZeroSettleUpgradeOffer`; `Accepted` → `executeUpgradeOffer(from, to)`. |
-| **Debug** | `DebugSettingsView` | masked publishable key, base URL, sdkVersion, configured/bootstrapped; `recommendedAppAccountToken()` (copyable); live `playSyncQueueDepthForDebug()`; scrolling `ZeroSettle.events` log with timestamps; buttons: re-evaluate offer / force restore / fetch txn history / fetch products / clear log / logout; current products + entitlements mini-dump. |
+The habit-domain unit tests (`HabitCalcTest`) run without a device:
 
-The shared `OfferManager` (one instance per identity) lives in `OfferHolder` so the
-Home and Offers screens — both of which render `ZeroSettleOfferTip` + `ZeroSettleCheckoutHost`
-— observe the same `pendingCheckoutUrl`. It's reset on logout / identity switch.
+```bash
+./gradlew :sample:testDebugUnitTest
+```
+
+## Key screens
+
+| Screen | What it does |
+|---|---|
+| **Onboarding** (`CreateUserScreen`) | Collects a user name to bootstrap the ZeroSettle identity. |
+| **Home** | Greeting, aggregated heatmap across all habits, per-habit heatmaps, habit list with check-off buttons. |
+| **Habit detail** | Per-habit calendar, current streak, completion history. |
+| **Add habit** | Form to create a new habit with emoji + color picker. |
+| **Launch paywall** | Premium gate — product cards with "Buy — Web" (`purchase()`) and "Buy — Google Play" (`purchaseViaPlayBilling()`); embeds `ZeroSettleOfferTip` + `ZeroSettleCheckoutHost`. |
+| **Premium upsell sheet** | Bottom-sheet upsell with upgrade-offer integration. |
+| **Settings** | Account, Subscription (cancel/pause/resume), StreakSaver, Reminder, and Offer cards. |
+| **Cancel flow** | `fetchCancelFlowConfig()` → `ZeroSettleCancelFlow`; result routes to `acceptSaveOffer` / `pauseSubscription` / `cancelSubscription`, with confetti on save. |
+| **Consumable shop** | Demonstrates consumable purchases via `purchase()`. |
+| **Settings → Developer** | Full debug harness: env switcher, raw entitlements, offer state, pending actions, cancel/upgrade debug, SDK event log. |
 
 Web checkout return deep link (`zerosettle://checkout/return`) is handled in
-`SampleActivity.onNewIntent` → `completeWebCheckout`.
+`MainActivity.onNewIntent` → `completeWebCheckout`.
 
 ## Notes
 
@@ -43,5 +79,5 @@ Web checkout return deep link (`zerosettle://checkout/return`) is handled in
   would prefer `collectAsStateWithLifecycle()`.
 - `ZeroSettle.playSyncQueueDepthForDebug()` / `recommendedAppAccountToken()` are
   debug-only inspectors, not the supported product surface.
-- This module has no unit tests (it's a manual harness); `./gradlew :sample:assembleDebug`
-  must build.
+- This module has `HabitCalcTest` unit tests; `./gradlew :sample:assembleDebug` must
+  also build cleanly.

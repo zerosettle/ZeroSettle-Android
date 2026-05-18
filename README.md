@@ -48,7 +48,10 @@ and the docs site (<https://docs.zerosettle.io/sdk/android>) for the full refere
   Play Billing + DataStore. No Compose dependency.
 - `:ui` — `io.zerosettle:zerosettle-android-ui`. Optional Compose + Material 3 drop-in
   components (offer tip, pending-action banner, checkout sheet, cancel flow, upgrade offer).
-- `:sample` — a runnable demo wiring every flow (see [`sample/README.md`](sample/README.md)).
+- `:sample` — **JustOne**, a functional habit-tracker reference app demonstrating a realistic
+  ZeroSettle SDK integration (~24 Compose screens; Room/DataStore/WorkManager domain; the
+  former 7-tab debug harness is preserved under Settings → Developer). See
+  [`sample/README.md`](sample/README.md).
 
 ## Building
 
