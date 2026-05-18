@@ -26,4 +26,32 @@ class HabitCalcTest {
         assertThat(completionsInWeek(completions, LocalDate.of(2026, 5, 20))).isEqualTo(3)
         assertThat(completionsInWeek(completions, LocalDate.of(2026, 5, 25))).isEqualTo(1)
     }
+
+    @Test fun currentStreak_empty_isZero() {
+        assertThat(currentStreak(emptyList(), 3, LocalDate.of(2026, 5, 20))).isEqualTo(0)
+    }
+
+    @Test fun currentStreak_countsConsecutiveMetWeeks() {
+        val completions = listOf(
+            c("h", "2026-05-18"), c("h", "2026-05-19"), c("h", "2026-05-20"),
+            c("h", "2026-05-11"), c("h", "2026-05-12"), c("h", "2026-05-13"),
+        )
+        assertThat(currentStreak(completions, 3, LocalDate.of(2026, 5, 20))).isEqualTo(2)
+    }
+
+    @Test fun currentStreak_currentWeekInProgressDoesNotBreak() {
+        val completions = listOf(
+            c("h", "2026-05-18"),
+            c("h", "2026-05-11"), c("h", "2026-05-12"), c("h", "2026-05-13"),
+        )
+        assertThat(currentStreak(completions, 3, LocalDate.of(2026, 5, 20))).isEqualTo(1)
+    }
+
+    @Test fun currentStreak_pastUnmetWeekBreaksStreak() {
+        val completions = listOf(
+            c("h", "2026-05-18"), c("h", "2026-05-19"), c("h", "2026-05-20"),
+            c("h", "2026-05-11"),
+        )
+        assertThat(currentStreak(completions, 3, LocalDate.of(2026, 5, 20))).isEqualTo(1)
+    }
 }

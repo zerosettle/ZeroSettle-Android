@@ -18,3 +18,31 @@ fun completionsInWeek(completions: List<Completion>, weekOf: LocalDate): Int {
         !d.isBefore(start) && !d.isAfter(end)
     }
 }
+
+/**
+ * Count of consecutive weeks (ending with the week containing [today]) in which the
+ * habit met [frequencyPerWeek]. The current week, if still short, does not break the
+ * streak (it is in progress) — it simply isn't counted yet.
+ */
+fun currentStreak(
+    completions: List<Completion>,
+    frequencyPerWeek: Int,
+    today: LocalDate,
+): Int {
+    if (completions.isEmpty()) return 0
+    val earliestWeek = startOfWeek(completions.minOf { LocalDate.parse(it.dateKey) })
+    var week = startOfWeek(today)
+    var streak = 0
+    var isCurrentWeek = true
+    while (!week.isBefore(earliestWeek)) {
+        val met = completionsInWeek(completions, week) >= frequencyPerWeek
+        if (met) {
+            streak++
+        } else if (!isCurrentWeek) {
+            break
+        }
+        isCurrentWeek = false
+        week = week.minusWeeks(1)
+    }
+    return streak
+}
