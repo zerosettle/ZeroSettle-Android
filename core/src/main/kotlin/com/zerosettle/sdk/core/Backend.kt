@@ -507,6 +507,12 @@ internal data class UcbInitiateResponse(
     @SerialName("merchant_country") val merchantCountry: String? = null,
     @SerialName("external_transaction_id") val externalTransactionId: String,
     @SerialName("transaction_id") val transactionId: Long? = null,
+    // FB-2: the canonical `ucb_*` string id of the materialised transaction.
+    // `GET /v1/iap/transactions/{id}/` resolves on this; the integer
+    // `transaction_id` PK 404s there. Nullable — graceful for an older
+    // backend that predates this field (same pattern as
+    // [PlaySyncResponse.transactionRef]).
+    @SerialName("transaction_ref") val transactionRef: String? = null,
 )
 
 @Serializable

@@ -20,12 +20,16 @@ internal sealed class UcbPurchaseOutcome {
     /**
      * @property externalTransactionId The opaque ID minted by the backend's
      *   `/v1/iap/play-ucb/initiate/` (matches `Transaction.external_transaction_id`).
-     * @property transactionId The numeric `Transaction.id` (or null when the
-     *   backend couldn't materialise a row — currently never null on success).
+     * @property transactionRef The canonical `ucb_*` string id of the
+     *   transaction (matches `transaction_ref` in the `/initiate/` response).
+     *   `GET /v1/iap/transactions/{id}/` resolves on this — the integer
+     *   `Transaction.id` PK 404s there. Null when an older backend didn't
+     *   emit `transaction_ref`; the deferred-bridge consumer then builds a
+     *   local `CheckoutTransaction` instead of fetching.
      */
     data class Completed(
         val externalTransactionId: String,
-        val transactionId: Long?,
+        val transactionRef: String?,
     ) : UcbPurchaseOutcome()
     object Canceled : UcbPurchaseOutcome()
     data class Failed(val message: String) : UcbPurchaseOutcome()
@@ -82,13 +86,14 @@ internal object UcbResultBridge {
 
     /**
      * Holds the deferred + the IDs the launcher reserved from the `/initiate/`
-     * response. The IDs are baked in by [composeCompleted] when the activity
-     * delivers a successful [PaymentSheetStatus.Completed].
+     * response. The IDs are baked into the composed [UcbPurchaseOutcome] by
+     * [deliver] when the activity delivers a successful
+     * [PaymentSheetStatus.Completed].
      */
     private data class Pending(
         val deferred: CompletableDeferred<UcbPurchaseOutcome>,
         val externalTransactionId: String,
-        val transactionId: Long?,
+        val transactionRef: String?,
     )
 
     @Volatile
@@ -119,12 +124,13 @@ internal object UcbResultBridge {
      *   on a successful PaymentSheet result so the deferred-bridge consumer
      *   in [com.zerosettle.sdk.ZeroSettle] can hydrate a `CheckoutTransaction`
      *   without a second round-trip.
-     * @param transactionId Numeric `Transaction.id` (or null when absent).
+     * @param transactionRef Canonical `ucb_*` transaction id from the
+     *   `/initiate/` response (or null when an older backend didn't emit it).
      */
     @Synchronized
     fun reserve(
         externalTransactionId: String,
-        transactionId: Long?,
+        transactionRef: String?,
     ): CompletableDeferred<UcbPurchaseOutcome> {
         pending?.let { stale ->
             // A previous launch never received its result. Most likely the
@@ -141,7 +147,7 @@ internal object UcbResultBridge {
         pending = Pending(
             deferred = fresh,
             externalTransactionId = externalTransactionId,
-            transactionId = transactionId,
+            transactionRef = transactionRef,
         )
         return fresh
     }
@@ -149,7 +155,7 @@ internal object UcbResultBridge {
     /**
      * Deliver a PaymentSheet result. The bridge composes the final
      * [UcbPurchaseOutcome] using the IDs reserved by the launcher: a
-     * `Completed` status becomes `UcbPurchaseOutcome.Completed(extId, txnId)`,
+     * `Completed` status becomes `UcbPurchaseOutcome.Completed(extId, txnRef)`,
      * other statuses pass through. No-op if no one is awaiting — silently
      * absorbs a duplicate-delivery from a recreated activity (e.g., rotation
      * racing PaymentSheet result).
@@ -160,7 +166,7 @@ internal object UcbResultBridge {
         val outcome = when (status) {
             is PaymentSheetStatus.Completed -> UcbPurchaseOutcome.Completed(
                 externalTransactionId = p.externalTransactionId,
-                transactionId = p.transactionId,
+                transactionRef = p.transactionRef,
             )
             is PaymentSheetStatus.Canceled -> UcbPurchaseOutcome.Canceled
             is PaymentSheetStatus.Failed -> UcbPurchaseOutcome.Failed(status.message)

@@ -227,5 +227,44 @@ class BackendTest {
         assertThat(resp.stripeAccount).isNull()
         assertThat(resp.merchantCountry).isNull()
         assertThat(resp.transactionId).isNull()
+        assertThat(resp.transactionRef).isNull()
+    }
+
+    /**
+     * FB-2: the backend's `/initiate/` response now also returns
+     * `transaction_ref` — the canonical `ucb_*` string id. `GET
+     * /v1/iap/transactions/{id}/` resolves on this; the integer
+     * `transaction_id` PK 404s there. The SDK must decode it so the UCB
+     * post-purchase fetch uses the right id.
+     */
+    @Test fun initiatePlayUcb_decodesTransactionRef() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{
+                    "client_secret":"pi_secret_xyz",
+                    "external_transaction_id":"abcdef0123456789abcdef0123456789",
+                    "transaction_id":42,
+                    "transaction_ref":"ucb_abc123"
+                }""".trimIndent(),
+            ),
+        )
+        val res = backend.initiatePlayUcb("tok", "pro", "u")
+        assertThat(res.isSuccess).isTrue()
+        assertThat(res.getOrThrow().transactionRef).isEqualTo("ucb_abc123")
+    }
+
+    /** Older backend with no `transaction_ref` field still decodes; ref is null. */
+    @Test fun initiatePlayUcb_transactionRefAbsent_decodesAsNull() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{
+                    "client_secret":"pi_secret_xyz",
+                    "external_transaction_id":"abcdef0123456789abcdef0123456789"
+                }""".trimIndent(),
+            ),
+        )
+        val res = backend.initiatePlayUcb("tok", "pro", "u")
+        assertThat(res.isSuccess).isTrue()
+        assertThat(res.getOrThrow().transactionRef).isNull()
     }
 }

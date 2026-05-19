@@ -62,7 +62,7 @@ class UcbPaymentSheetActivityTest {
         // deferred so any awaiting caller resumes.
         val pending = UcbResultBridge.reserve(
             externalTransactionId = "abcdef0123456789",
-            transactionId = 42L,
+            transactionRef = "ucb_abcdef",
         )
         val intent = Intent(
             ApplicationProvider.getApplicationContext(),

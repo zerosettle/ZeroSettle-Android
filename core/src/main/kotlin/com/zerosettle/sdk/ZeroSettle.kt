@@ -192,21 +192,26 @@ public object ZeroSettle {
                 logger = cfg.logger,
                 // UCB completion bridge — when the StripePaymentSheet activity
                 // returns a Completed outcome, resolve any in-flight
-                // [purchaseViaPlayBilling] caller with the backend's numeric
-                // transaction id (toString'd, matching the standard Play-sync
-                // path's wire shape). The webhook subsequently fans the new
-                // entitlement out via the next [restoreEntitlements] / poll;
-                // we don't gate the awaiter on entitlement materialisation —
-                // PaymentSheet success IS the user-visible purchase success.
+                // [purchaseViaPlayBilling] caller with the backend's canonical
+                // `transaction_ref` (a `ucb_*` string, matching the standard
+                // Play-sync path's wire shape). The webhook subsequently fans
+                // the new entitlement out via the next [restoreEntitlements] /
+                // poll; we don't gate the awaiter on entitlement
+                // materialisation — PaymentSheet success IS the user-visible
+                // purchase success.
                 onResult = { outcome ->
                     when (outcome) {
                         is com.zerosettle.sdk.billing.UcbPurchaseOutcome.Completed -> {
-                            // Prefer numeric transaction id when present
-                            // (matches the Play-sync wire shape); fall back to
-                            // the external id if the backend ever returns null.
-                            val id = outcome.transactionId?.toString()
-                                ?: outcome.externalTransactionId
-                            pendingPlayPurchaseDeferred?.complete(id)
+                            // The canonical `ucb_*` ref resolves on
+                            // `GET /v1/iap/transactions/{id}/`. When it's null
+                            // (older backend that didn't emit `transaction_ref`)
+                            // complete with an empty string — `purchaseViaPlayBilling`
+                            // then builds a local CheckoutTransaction rather than
+                            // fetching, the same graceful path the normal Play
+                            // sync path (RC-F) uses. `externalTransactionId` is
+                            // NOT a resolvable transaction id and would also
+                            // 404, so it is not used as a fallback.
+                            pendingPlayPurchaseDeferred?.complete(outcome.transactionRef ?: "")
                         }
                         is com.zerosettle.sdk.billing.UcbPurchaseOutcome.Canceled -> {
                             pendingPlayPurchaseDeferred?.completeExceptionally(

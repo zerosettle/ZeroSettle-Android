@@ -11,9 +11,9 @@ import org.junit.Test
  * [PaymentSheetStatus] with the IDs the launcher reserved from `/initiate/`
  * into the final [UcbPurchaseOutcome] handed to the suspending caller.
  *
- *   reserve(extId, txnId) → deferred
+ *   reserve(extId, txnRef) → deferred
  *      → activity calls deliver(PaymentSheetStatus.Completed)
- *      → bridge composes UcbPurchaseOutcome.Completed(extId, txnId)
+ *      → bridge composes UcbPurchaseOutcome.Completed(extId, txnRef)
  *      → deferred.await() resumes the launcher with the composed outcome
  *
  * Single-flight: a second reserve while one is armed completes the stale
@@ -28,7 +28,7 @@ class UcbResultBridgeTest {
     @Test fun completed_status_composesWithReservedIds() = runTest {
         val pending = UcbResultBridge.reserve(
             externalTransactionId = "ext_abc",
-            transactionId = 7L,
+            transactionRef = "ucb_abc123",
         )
         UcbResultBridge.deliver(PaymentSheetStatus.Completed)
 
@@ -36,33 +36,33 @@ class UcbResultBridgeTest {
         assertThat(outcome).isInstanceOf(UcbPurchaseOutcome.Completed::class.java)
         val completed = outcome as UcbPurchaseOutcome.Completed
         assertThat(completed.externalTransactionId).isEqualTo("ext_abc")
-        assertThat(completed.transactionId).isEqualTo(7L)
+        assertThat(completed.transactionRef).isEqualTo("ucb_abc123")
     }
 
-    @Test fun completed_status_carriesNullTransactionId_whenReservedNull() = runTest {
-        // The backend's /initiate/ schema declares transaction_id as nullable.
-        // When the backend returns null, the launcher reserves with null and
-        // the composed Completed must reflect that.
+    @Test fun completed_status_carriesNullTransactionRef_whenReservedNull() = runTest {
+        // The backend's /initiate/ schema declares transaction_ref as nullable
+        // (older backend predates it). When the backend omits it, the launcher
+        // reserves with null and the composed Completed must reflect that.
         val pending = UcbResultBridge.reserve(
             externalTransactionId = "ext_xyz",
-            transactionId = null,
+            transactionRef = null,
         )
         UcbResultBridge.deliver(PaymentSheetStatus.Completed)
 
         val outcome = pending.await() as UcbPurchaseOutcome.Completed
         assertThat(outcome.externalTransactionId).isEqualTo("ext_xyz")
-        assertThat(outcome.transactionId).isNull()
+        assertThat(outcome.transactionRef).isNull()
     }
 
     @Test fun canceled_status_resolvesAsCanceledOutcome() = runTest {
-        val pending = UcbResultBridge.reserve("e", 1L)
+        val pending = UcbResultBridge.reserve("e", "ucb_1")
         UcbResultBridge.deliver(PaymentSheetStatus.Canceled)
 
         assertThat(pending.await()).isEqualTo(UcbPurchaseOutcome.Canceled)
     }
 
     @Test fun failed_status_resolvesAsFailedOutcomeWithMessage() = runTest {
-        val pending = UcbResultBridge.reserve("e", 1L)
+        val pending = UcbResultBridge.reserve("e", "ucb_1")
         UcbResultBridge.deliver(PaymentSheetStatus.Failed("card_declined"))
 
         val outcome = pending.await()
@@ -75,8 +75,8 @@ class UcbResultBridgeTest {
         // second reserve while one is armed must complete the stale
         // deferred with Failed (preventing a leaked awaiter) and arm a
         // fresh one for the new caller.
-        val stale = UcbResultBridge.reserve("ext_stale", 100L)
-        val fresh = UcbResultBridge.reserve("ext_fresh", 200L)
+        val stale = UcbResultBridge.reserve("ext_stale", "ucb_stale")
+        val fresh = UcbResultBridge.reserve("ext_fresh", "ucb_fresh")
 
         // Stale was completed at the moment of re-reserve.
         assertThat(stale.isCompleted).isTrue()
@@ -86,7 +86,7 @@ class UcbResultBridgeTest {
         val freshOutcome = fresh.await() as UcbPurchaseOutcome.Completed
         // The fresh outcome carries the second-reserve IDs, not the stale ones.
         assertThat(freshOutcome.externalTransactionId).isEqualTo("ext_fresh")
-        assertThat(freshOutcome.transactionId).isEqualTo(200L)
+        assertThat(freshOutcome.transactionRef).isEqualTo("ucb_fresh")
     }
 
     @Test fun deliver_withoutReserve_isNoOp() {
@@ -98,7 +98,7 @@ class UcbResultBridgeTest {
     }
 
     @Test fun reset_completesPending_andDisarms() = runTest {
-        val pending = UcbResultBridge.reserve("e", 1L)
+        val pending = UcbResultBridge.reserve("e", "ucb_1")
         UcbResultBridge.reset()
         assertThat(pending.isCompleted).isTrue()
         assertThat(pending.await()).isInstanceOf(UcbPurchaseOutcome.Failed::class.java)

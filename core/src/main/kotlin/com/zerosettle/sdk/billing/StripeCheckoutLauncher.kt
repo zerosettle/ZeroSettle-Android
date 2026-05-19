@@ -101,10 +101,12 @@ internal class StripeCheckoutLauncher(
 
         // 2) Reserve the bridge with the IDs from `/initiate/`. The activity
         //    will deliver a PaymentSheetStatus and the bridge composes the
-        //    final Completed(extId, txnId) using these reserved IDs.
+        //    final Completed(extId, txnRef) using these reserved IDs. We
+        //    thread the canonical `transaction_ref` (a `ucb_*` string) — the
+        //    integer `transaction_id` PK 404s on the post-purchase fetch.
         val pending = UcbResultBridge.reserve(
             externalTransactionId = response.externalTransactionId,
-            transactionId = response.transactionId,
+            transactionRef = response.transactionRef,
         )
 
         // 3) Dispatch the Intent. We have no Activity reference here (the

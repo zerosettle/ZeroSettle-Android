@@ -62,7 +62,7 @@ class StripeCheckoutLauncherCompletionTest {
     }
 
     @Test fun completed_outcome_carriesReservedIds_andIsForwardedToOnResult() = runBlocking {
-        // The launcher reserves the bridge with (externalTransactionId, transactionId)
+        // The launcher reserves the bridge with (externalTransactionId, transactionRef)
         // from /initiate/. When the activity delivers PaymentSheetStatus.Completed,
         // the bridge composes UcbPurchaseOutcome.Completed using those reserved
         // IDs. The launcher then forwards that to `onResult` before returning.
@@ -73,7 +73,8 @@ class StripeCheckoutLauncherCompletionTest {
                     "stripe_account":"acct_test_1",
                     "merchant_country":"US",
                     "external_transaction_id":"ext_zzz",
-                    "transaction_id":1234
+                    "transaction_id":1234,
+                    "transaction_ref":"ucb_zzz"
                 }""".trimIndent(),
             ),
         )
@@ -100,7 +101,10 @@ class StripeCheckoutLauncherCompletionTest {
         assertThat(outcome).isInstanceOf(UcbPurchaseOutcome.Completed::class.java)
         val completed = outcome as UcbPurchaseOutcome.Completed
         assertThat(completed.externalTransactionId).isEqualTo("ext_zzz")
-        assertThat(completed.transactionId).isEqualTo(1234L)
+        // The launcher reserves the bridge with `transaction_ref` (the
+        // canonical `ucb_*` id) — the integer `transaction_id` PK 404s on
+        // the post-purchase fetch and must not reach the deferred.
+        assertThat(completed.transactionRef).isEqualTo("ucb_zzz")
     }
 
     @Test fun canceled_outcome_isForwardedToOnResult() = runBlocking {

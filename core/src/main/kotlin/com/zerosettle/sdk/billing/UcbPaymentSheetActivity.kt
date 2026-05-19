@@ -90,7 +90,7 @@ internal class UcbPaymentSheetActivity : ComponentActivity() {
 
     private fun onPaymentSheetResult(result: PaymentSheetResult) {
         // The activity ONLY knows the PaymentSheet result; the
-        // externalTransactionId + transactionId were reserved on the bridge
+        // externalTransactionId + transactionRef were reserved on the bridge
         // by the launcher from the `/initiate/` response. The bridge composes
         // them into a final [UcbPurchaseOutcome] using the reserved IDs —
         // see [UcbResultBridge.deliver].
