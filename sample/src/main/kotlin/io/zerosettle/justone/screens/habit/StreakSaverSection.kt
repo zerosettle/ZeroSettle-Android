@@ -47,7 +47,7 @@ fun StreakSaverSection(habit: Habit, modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.height(12.dp))
             Button(
-                onClick = { scope.launch { ctx.let { UserPrefs(it).useStreakSaver() } } },
+                onClick = { scope.launch { UserPrefs(ctx).useStreakSaver() } },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Use streak saver")
