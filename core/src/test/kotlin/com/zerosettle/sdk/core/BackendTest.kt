@@ -149,6 +149,34 @@ class BackendTest {
         assertThat(resp.entitlementId).isEqualTo(512L)
     }
 
+    /**
+     * The backend now also returns `transaction_ref` — the canonical `txn_*`
+     * string id of the synced transaction. `GET /v1/iap/transactions/{id}/`
+     * resolves on this; the integer `transaction_id` PK 404s there. The SDK
+     * must decode it so the post-purchase fetch can use the right id.
+     */
+    @Test fun syncPlayPurchase_decodesTransactionRef() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":"ok","owned":true,"transaction_id":7300,
+                   "transaction_ref":"txn_7300","entitlement_id":null,"is_sandbox":false}""",
+            ),
+        )
+        val res = callSyncPlayPurchase()
+        assertThat(res.isSuccess).isTrue()
+        val resp = res.getOrThrow()
+        assertThat(resp.transactionRef).isEqualTo("txn_7300")
+        assertThat(resp.transactionId).isEqualTo(7300L)
+    }
+
+    /** Older backend with no `transaction_ref` field still decodes; ref is null. */
+    @Test fun syncPlayPurchase_transactionRefAbsent_decodesAsNull() = runTest {
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7300}"""))
+        val res = callSyncPlayPurchase()
+        assertThat(res.isSuccess).isTrue()
+        assertThat(res.getOrThrow().transactionRef).isNull()
+    }
+
     @Test fun initiatePlayUcb_postsBodyAndDecodesResponse() = runTest {
         server.enqueue(
             MockResponse().setBody(

@@ -100,10 +100,25 @@ class PurchaseSyncProcessorTest {
     // session belong to a previous awaiter that is already gone. Resolving the
     // current-session deferred with an unrelated transactionId would be wrong.
 
-    @Test fun process_ownedTrue_firesOnPurchaseSynced_withTransactionId() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7001}"""))
+    @Test fun process_ownedTrue_firesOnPurchaseSynced_withTransactionRef() = runTest {
+        // The canonical `txn_*` ref — NOT the integer PK — must flow to the
+        // awaiter so `purchaseViaPlayBilling`'s `fetchTransaction` resolves.
+        server.enqueue(
+            MockResponse().setBody("""{"owned":true,"transaction_id":7300,"transaction_ref":"txn_7300"}"""),
+        )
         makeProcessor().process(descriptor())
-        assertThat(resolvedTransactionIds).containsExactly("7001")
+        assertThat(resolvedTransactionIds).containsExactly("txn_7300")
+        assertThat(resolvedExceptions).isEmpty()
+    }
+
+    @Test fun process_ownedTrue_noTransactionRef_firesOnPurchaseSynced_withEmptyString() = runTest {
+        // Older backend: no `transaction_ref`. The int PK must NOT be used as
+        // the fetch id (it 404s). The awaiter resolves SUCCESSFULLY with an
+        // empty string so `purchaseViaPlayBilling` builds a local transaction
+        // instead of failing with `missing_transaction_id`.
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7300}"""))
+        makeProcessor().process(descriptor())
+        assertThat(resolvedTransactionIds).containsExactly("")
         assertThat(resolvedExceptions).isEmpty()
     }
 

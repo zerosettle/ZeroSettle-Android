@@ -978,13 +978,48 @@ public object ZeroSettle {
             // CancellationException intentionally propagates per Kotlin coroutine
             // convention — the `finally` below still runs and resets state.
 
+            // `transactionId` is the canonical `txn_*` ref from the sync
+            // response — `fetchTransaction` resolves it correctly. When it's
+            // empty the backend is older and did not emit `transaction_ref`;
+            // fetching `""` would 404, so build a local CheckoutTransaction
+            // from what the SDK already has. A completed Play purchase must
+            // always surface as Result.success.
             if (transactionId.isEmpty()) {
-                return Result.failure(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
+                return Result.success(buildLocalPlayTransaction(productId, product))
             }
             return be.fetchTransaction(transactionId)
         } finally {
             pendingPlayPurchaseDeferred = null
         }
+    }
+
+    /**
+     * Build a [CheckoutTransaction][com.zerosettle.sdk.models.CheckoutTransaction]
+     * locally for a confirmed Play purchase when the backend did not return a
+     * canonical `transaction_ref` (older backend). The purchase IS recorded
+     * server-side (`owned=true`); this is purely the SDK reconstructing the
+     * record it would otherwise have fetched, so the caller still receives a
+     * `Result.success`. Price/name come from the catalog [product]'s Play
+     * price.
+     */
+    private fun buildLocalPlayTransaction(
+        productId: String,
+        product: Product,
+    ): com.zerosettle.sdk.models.CheckoutTransaction {
+        val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            .format(java.util.Date())
+        val playPrice = product.playStorePrice
+        return com.zerosettle.sdk.models.CheckoutTransaction(
+            id = "",
+            productId = productId,
+            status = com.zerosettle.sdk.models.CheckoutTransaction.Status.COMPLETED,
+            source = com.zerosettle.sdk.models.EntitlementSource.PLAY_STORE,
+            purchasedAt = nowIso,
+            productName = product.displayName,
+            amountCents = playPrice?.amountCents,
+            currency = playPrice?.currencyCode,
+        )
     }
 
     // ─── Unified offers ────────────────────────────────────────────────────

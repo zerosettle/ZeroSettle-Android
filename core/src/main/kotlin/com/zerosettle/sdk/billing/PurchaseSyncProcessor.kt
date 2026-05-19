@@ -122,7 +122,13 @@ internal class PurchaseSyncProcessor(
         return when {
             resp.owned -> {
                 queue.remove(d.purchaseToken)
-                val txnId = resp.transactionId?.toString() ?: ""
+                // Canonical id is the `txn_*` ref — that's what
+                // `Backend.fetchTransaction` resolves on. The integer
+                // `transactionId` PK 404s there, so it must NOT flow
+                // downstream as a transaction id. An older backend may not
+                // emit `transaction_ref`; then the id is empty and
+                // `purchaseViaPlayBilling` builds a local CheckoutTransaction.
+                val txnId = resp.transactionRef ?: ""
                 // Resolve the awaiter FIRST — as soon as OUR backend has recorded
                 // the purchase the user-visible operation is done. The local Play
                 // ack that follows is bookkeeping that satisfies the 3-day window
@@ -135,11 +141,14 @@ internal class PurchaseSyncProcessor(
                 // suspending caller; we still wrap it in `runCatching` so the
                 // throw doesn't surface out of `process()` and stop the
                 // coordinator's purchase loop (it's logged via the silent catch).
-                if (txnId.isNotEmpty()) {
-                    onPurchaseSynced(txnId)
-                } else {
-                    onPurchaseFailed(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
-                }
+                // Always resolve the awaiter SUCCESSFULLY on `owned=true`,
+                // even when `txnId` is empty (older backend, no
+                // `transaction_ref`). The empty-string sentinel travels
+                // through the deferred; `purchaseViaPlayBilling` branches on
+                // it to build a local CheckoutTransaction rather than calling
+                // `fetchTransaction("")` (which would 404). A completed
+                // purchase must never surface as a failure to the caller.
+                onPurchaseSynced(txnId)
                 emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = d.productId, transactionId = txnId))
                 if (!d.isAcknowledged) finalizeAndLog(d.productId, d.purchaseToken)
                 Result.success(Unit)
@@ -148,7 +157,7 @@ internal class PurchaseSyncProcessor(
                 onConflictClaim(
                     PendingClaim(
                         productId = d.productId,
-                        originalTransactionId = resp.transactionId?.toString() ?: d.orderId.orEmpty(),
+                        originalTransactionId = resp.transactionRef ?: d.orderId.orEmpty(),
                         existingOwnerHint = resp.existingOwnerHint ?: "another account",
                     ),
                 )
@@ -189,7 +198,7 @@ internal class PurchaseSyncProcessor(
                     if (resp.owned) {
                         finalizeAndLog(row.productId, row.purchaseToken)
                         queue.remove(row.purchaseToken)
-                        emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = row.productId, transactionId = resp.transactionId?.toString() ?: ""))
+                        emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = row.productId, transactionId = resp.transactionRef ?: ""))
                     } else {
                         queue.recordFailure(row.purchaseToken, nowMillis())
                     }

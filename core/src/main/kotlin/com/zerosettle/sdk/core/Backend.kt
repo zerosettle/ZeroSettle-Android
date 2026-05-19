@@ -479,6 +479,12 @@ internal data class PlaySyncRequest(
 internal data class PlaySyncResponse(
     val owned: Boolean = false,
     @SerialName("transaction_id") val transactionId: Long? = null,
+    // Canonical `txn_*` string id of the synced transaction. This is the id
+    // the backend's `GET /v1/iap/transactions/{id}/` resolves on — the integer
+    // `transactionId` PK 404s there. Always prefer this for any downstream
+    // transaction-id use (post-purchase fetch, events, pending claims).
+    // Nullable so an older backend that doesn't emit it still decodes.
+    @SerialName("transaction_ref") val transactionRef: String? = null,
     @SerialName("entitlement_id") val entitlementId: Long? = null,
     @SerialName("is_sandbox") val isSandbox: Boolean = false,
     val conflict: Boolean = false,
