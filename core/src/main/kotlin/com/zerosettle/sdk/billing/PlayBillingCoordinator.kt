@@ -57,6 +57,29 @@ internal fun isConsumable(
 ): Boolean = productTypeLookup(productId) == ProductType.CONSUMABLE
 
 /**
+ * Resolve a [Product]'s [ProductType] from a finalize-time lookup key.
+ *
+ * The key is a **Play Console SKU** — `Purchase.products[0]`, the id Play
+ * reports on a finalized purchase. The forward purchase path launches the
+ * billing flow with `product.playProductId ?: product.id`
+ * ([PlayBillingCoordinator.purchaseViaPlayBilling]), so the reverse lookup MUST
+ * prefer a [Product.playProductId] match. It falls back to [Product.id] for
+ * products whose SKU == id (no separate `playProductId` configured).
+ *
+ * Matching only [Product.id] (the prior behavior) returns `null` whenever
+ * `playProductId != id` — the normal case — which routed consumables to
+ * `acknowledge` instead of `consume` and trapped re-purchase in
+ * `ITEM_ALREADY_OWNED`.
+ *
+ * Top-level by design so it's unit-testable without Android context. See
+ * [com.zerosettle.sdk.billing.ProductTypeForPlaySkuTest].
+ */
+internal fun productTypeForPlaySku(products: List<Product>, playSku: String): ProductType? {
+    val byPlay = products.firstOrNull { it.playProductId == playSku }
+    return (byPlay ?: products.firstOrNull { it.id == playSku })?.type
+}
+
+/**
  * Glue between [ZeroSettle][com.zerosettle.sdk.ZeroSettle] and the Play Billing layer.
  * Created at `configure()` when `syncPlayPurchases` is true; the queue is cleared and
  * the connection ended on `logout()` ([shutdown]).
@@ -146,7 +169,7 @@ internal class PlayBillingCoordinator(
         },
         emitEvent = emitEvent, onConflictClaim = onPendingClaim,
         onPurchaseSynced = onPurchaseSynced, onPurchaseFailed = onPurchaseFailed,
-        strictAck = strictAck,
+        strictAck = strictAck, logger = logger,
     )
 
     private val reconciler = SubscriptionReconciler(backend)

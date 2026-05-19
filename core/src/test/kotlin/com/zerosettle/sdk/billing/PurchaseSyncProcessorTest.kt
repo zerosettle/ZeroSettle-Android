@@ -3,6 +3,7 @@ package com.zerosettle.sdk.billing
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.zerosettle.sdk.core.Backend
+import com.zerosettle.sdk.core.ZeroSettleLogger
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -165,6 +166,53 @@ class PurchaseSyncProcessorTest {
         )
         proc.retryQueued()
         assertThat(acked).contains("tok1")
+    }
+
+    // ─── Fix 2: a non-OK finalize Result must be observable ──────────────────
+    //
+    // `finalize` returns `Result<Unit>` carrying the consume/acknowledge
+    // BillingResult outcome. A returned `Result.failure` (non-OK BillingResult)
+    // is NOT a thrown exception, so the surrounding `runCatching` swallowed it
+    // silently — no log, no signal. The processor must inspect the returned
+    // Result and log a warning on failure.
+
+    private class CapturingLogger : ZeroSettleLogger {
+        val warnings = mutableListOf<String>()
+        override fun verbose(tag: String, message: String, throwable: Throwable?) {}
+        override fun debug(tag: String, message: String, throwable: Throwable?) {}
+        override fun info(tag: String, message: String, throwable: Throwable?) {}
+        override fun warn(tag: String, message: String, throwable: Throwable?) { warnings += message }
+        override fun error(tag: String, message: String, throwable: Throwable?) {}
+    }
+
+    @Test fun process_finalizeReturnsFailure_isLogged() = runTest {
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_1"}"""))
+        val log = CapturingLogger()
+        val proc = PurchaseSyncProcessor(
+            backend = backend, queue = queue,
+            finalize = { _, _ -> Result.failure(IllegalStateException("billing result not OK")) },
+            emitEvent = { }, strictAck = false, nowMillis = { 0L }, logger = log,
+        )
+        val res = proc.process(descriptor())
+        // The sync itself still succeeds (backend confirmed); the finalize
+        // failure is logged, not crashed.
+        assertThat(res.isSuccess).isTrue()
+        assertThat(log.warnings).hasSize(1)
+        assertThat(log.warnings.first()).contains("finalize failed")
+    }
+
+    @Test fun process_finalizeThrows_isLoggedAndDoesNotCrashSync() = runTest {
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_1"}"""))
+        val log = CapturingLogger()
+        val proc = PurchaseSyncProcessor(
+            backend = backend, queue = queue,
+            finalize = { _, _ -> throw IllegalStateException("billing disconnected") },
+            emitEvent = { }, strictAck = false, nowMillis = { 0L }, logger = log,
+        )
+        val res = proc.process(descriptor())
+        assertThat(res.isSuccess).isTrue()
+        assertThat(log.warnings).hasSize(1)
+        assertThat(log.warnings.first()).contains("finalize threw")
     }
 
     @Test fun retryQueued_strictModeOn_neverDefensiveAcks() = runTest {

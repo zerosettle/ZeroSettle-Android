@@ -2,6 +2,7 @@ package com.zerosettle.sdk.billing
 
 import com.zerosettle.sdk.core.Backend
 import com.zerosettle.sdk.core.ZeroSettleEvent
+import com.zerosettle.sdk.core.ZeroSettleLogger
 import com.zerosettle.sdk.models.PendingClaim
 import com.zerosettle.sdk.models.ZeroSettleError
 
@@ -56,10 +57,36 @@ internal class PurchaseSyncProcessor(
     private val onPurchaseFailed: (error: ZeroSettleError) -> Unit = {},
     private val strictAck: Boolean = false,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    // Used to surface a non-OK [finalize] result. [finalize] returns a
+    // `Result<Unit>` carrying the consume/acknowledge BillingResult outcome; a
+    // returned `Result.failure` (non-OK BillingResult) is NOT a thrown
+    // exception, so the surrounding `runCatching` would silently swallow it.
+    // Nullable + null-default so existing call sites compile unchanged.
+    private val logger: ZeroSettleLogger? = null,
 ) {
 
     private companion object {
         const val DEFENSIVE_ACK_WINDOW_MILLIS = 24L * 60 * 60 * 1000
+    }
+
+    /**
+     * Run [finalize] and make BOTH failure modes observable:
+     *  - a thrown exception (caught by the outer `runCatching` so a Billing
+     *    disconnect doesn't crash the sync loop), and
+     *  - a returned `Result.failure` (a non-OK consume/acknowledge
+     *    BillingResult) — previously discarded entirely.
+     * Logging only; the queue/redelivery behavior is intentionally unchanged.
+     */
+    private suspend fun finalizeAndLog(productId: String, purchaseToken: String) {
+        runCatching { finalize(productId, purchaseToken) }
+            .onSuccess { result ->
+                result.onFailure { e ->
+                    logger?.warn("billing", "finalize failed for $productId: ${e.message}", e)
+                }
+            }
+            .onFailure { e ->
+                logger?.warn("billing", "finalize threw for $productId: ${e.message}", e)
+            }
     }
 
     /** Sync one freshly-observed purchase. */
@@ -114,7 +141,7 @@ internal class PurchaseSyncProcessor(
                     onPurchaseFailed(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
                 }
                 emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = d.productId, transactionId = txnId))
-                if (!d.isAcknowledged) runCatching { finalize(d.productId, d.purchaseToken) }
+                if (!d.isAcknowledged) finalizeAndLog(d.productId, d.purchaseToken)
                 Result.success(Unit)
             }
             resp.conflict && resp.claimAvailable -> {
@@ -143,7 +170,7 @@ internal class PurchaseSyncProcessor(
                 if (!strictAck && row.lastAttemptAtMillis != null &&
                     nowMillis() - row.lastAttemptAtMillis >= DEFENSIVE_ACK_WINDOW_MILLIS
                 ) {
-                    finalize(row.productId, row.purchaseToken) // defensive finalize; keep the row so we keep trying to sync
+                    finalizeAndLog(row.productId, row.purchaseToken) // defensive finalize; keep the row so we keep trying to sync
                 }
                 emitEvent(ZeroSettleEvent.SyncFailed(purchaseToken = row.purchaseToken, attempts = row.attemptCount, terminal = true))
                 continue
@@ -160,7 +187,7 @@ internal class PurchaseSyncProcessor(
             syncRes.fold(
                 onSuccess = { resp ->
                     if (resp.owned) {
-                        finalize(row.productId, row.purchaseToken)
+                        finalizeAndLog(row.productId, row.purchaseToken)
                         queue.remove(row.purchaseToken)
                         emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = row.productId, transactionId = resp.transactionId ?: ""))
                     } else {

@@ -160,11 +160,16 @@ public object ZeroSettle {
             customerNameProvider = { customerName },
             customerEmailProvider = { customerEmail },
             // Routes purchase finalize between consume (consumables) and
-            // acknowledge (everything else). Backend `reference_id` is
-            // server-normalized to lowercase and Play `Purchase.products[0]`
-            // is the Play Console product id (lowercase by Play requirement),
-            // so exact `==` is correct here — no case-insensitive lookup.
-            productTypeLookup = { pid -> _products.value.firstOrNull { it.id == pid }?.type },
+            // acknowledge (everything else). The lookup key is a Play Console
+            // SKU (`Purchase.products[0]`); the forward path launches the flow
+            // with `playProductId ?: id`, so the reverse lookup must prefer a
+            // `playProductId` match (falling back to `id`). Matching `id` only
+            // returned null whenever `playProductId != id` — the normal case —
+            // routing consumables to acknowledge and trapping re-purchase in
+            // ITEM_ALREADY_OWNED.
+            productTypeLookup = { sku ->
+                com.zerosettle.sdk.billing.productTypeForPlaySku(_products.value, sku)
+            },
             onEntitlementsMayHaveChanged = {
                 scope.scope.launch { restoreEntitlements() }
                 entitlementPoller?.pollNow()
