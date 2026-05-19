@@ -276,19 +276,30 @@ public class PlayBillingManager(
             userId: String,
             customerName: String?,
             customerEmail: String?,
-        ): PurchaseDescriptor = PurchaseDescriptor(
-            purchaseToken = purchase.purchaseToken,
-            productId = purchase.products.firstOrNull().orEmpty(),
-            packageName = purchase.packageName,
-            userId = userId,
-            orderId = purchase.orderId,
-            purchaseState = purchase.purchaseState,
-            isAcknowledged = purchase.isAcknowledged,
-            signature = purchase.signature,
-            originalJson = purchase.originalJson,
-            willAutoRenew = purchase.isAutoRenewing,
-            customerName = customerName,
-            customerEmail = customerEmail,
-        )
+        ): PurchaseDescriptor {
+            // ZS-diag: boundary 1 — raw Play Purchase before building PurchaseDescriptor
+            android.util.Log.w(
+                "ZS-diag",
+                "describePurchase: products=${purchase.products}" +
+                    " token=${purchase.purchaseToken.take(12)}" +
+                    " isAcknowledged=${purchase.isAcknowledged}" +
+                    " purchaseState=${purchase.purchaseState}" +
+                    " orderId=${purchase.orderId}",
+            )
+            return PurchaseDescriptor(
+                purchaseToken = purchase.purchaseToken,
+                productId = purchase.products.firstOrNull().orEmpty(),
+                packageName = purchase.packageName,
+                userId = userId,
+                orderId = purchase.orderId,
+                purchaseState = purchase.purchaseState,
+                isAcknowledged = purchase.isAcknowledged,
+                signature = purchase.signature,
+                originalJson = purchase.originalJson,
+                willAutoRenew = purchase.isAutoRenewing,
+                customerName = customerName,
+                customerEmail = customerEmail,
+            )
+        }
     }
 }

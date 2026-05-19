@@ -164,7 +164,14 @@ internal class PlayBillingCoordinator(
     private val processor = PurchaseSyncProcessor(
         backend = backend, queue = queue,
         finalize = { productId, token ->
-            if (isConsumable(productId, productTypeLookup)) billing.consume(token)
+            // ZS-diag: boundary 3 — finalize routing decision
+            val resolvedType = productTypeLookup(productId)
+            val consumable = isConsumable(productId, productTypeLookup)
+            android.util.Log.w(
+                "ZS-diag",
+                "finalize: productId=$productId resolvedType=$resolvedType isConsumable=$consumable → ${if (consumable) "consume" else "acknowledge"}",
+            )
+            if (consumable) billing.consume(token)
             else billing.acknowledge(token)
         },
         emitEvent = emitEvent, onConflictClaim = onPendingClaim,

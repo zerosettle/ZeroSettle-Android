@@ -91,6 +91,15 @@ internal class PurchaseSyncProcessor(
 
     /** Sync one freshly-observed purchase. */
     public suspend fun process(d: PurchaseDescriptor): Result<Unit> {
+        // ZS-diag: boundary 2a — PurchaseSyncProcessor.process entry
+        android.util.Log.w(
+            "ZS-diag",
+            "process entry: productId=${d.productId}" +
+                " token=${d.purchaseToken.take(12)}" +
+                " isAcknowledged=${d.isAcknowledged}" +
+                " purchaseState=${d.purchaseState}",
+        )
+
         if (d.purchaseState == 2 /* PENDING */) {
             // Resolve the awaiter so a parental-approval / pending purchase
             // doesn't hang `purchaseViaPlayBilling()` forever waiting on a
@@ -104,6 +113,29 @@ internal class PurchaseSyncProcessor(
             packageName = d.packageName, orderId = d.orderId, purchaseState = d.purchaseState,
             isAcknowledged = d.isAcknowledged, signature = d.signature, originalJson = d.originalJson,
             willAutoRenew = d.willAutoRenew, customerName = d.customerName, customerEmail = d.customerEmail,
+        )
+
+        // ZS-diag: boundary 2b — syncPlayPurchase returned
+        syncRes.fold(
+            onSuccess = { resp ->
+                android.util.Log.w(
+                    "ZS-diag",
+                    "syncPlayPurchase SUCCESS:" +
+                        " owned=${resp.owned}" +
+                        " conflict=${resp.conflict}" +
+                        " claimAvailable=${resp.claimAvailable}" +
+                        " transactionId=${resp.transactionId}" +
+                        " entitlementId=${resp.entitlementId}" +
+                        " status=n/a" +
+                        " isSandbox=${resp.isSandbox}",
+                )
+            },
+            onFailure = { err ->
+                android.util.Log.w(
+                    "ZS-diag",
+                    "syncPlayPurchase FAILURE: ${err.javaClass.simpleName}: ${err.message}",
+                )
+            },
         )
 
         val resp = syncRes.getOrElse { err ->
@@ -121,6 +153,8 @@ internal class PurchaseSyncProcessor(
 
         return when {
             resp.owned -> {
+                // ZS-diag: boundary 2c — owned branch taken
+                android.util.Log.w("ZS-diag", "process branch: owned=true → will finalize productId=${d.productId}")
                 queue.remove(d.purchaseToken)
                 val txnId = resp.transactionId ?: ""
                 // Resolve the awaiter FIRST — as soon as OUR backend has recorded
@@ -141,10 +175,17 @@ internal class PurchaseSyncProcessor(
                     onPurchaseFailed(ZeroSettleError.CheckoutFailed("missing_transaction_id"))
                 }
                 emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = d.productId, transactionId = txnId))
-                if (!d.isAcknowledged) finalizeAndLog(d.productId, d.purchaseToken)
+                if (!d.isAcknowledged) {
+                    // ZS-diag: boundary 2d — about to call finalizeAndLog
+                    android.util.Log.w("ZS-diag", "process: calling finalizeAndLog for productId=${d.productId} token=${d.purchaseToken.take(12)}")
+                    finalizeAndLog(d.productId, d.purchaseToken)
+                    android.util.Log.w("ZS-diag", "process: finalizeAndLog returned for productId=${d.productId}")
+                }
                 Result.success(Unit)
             }
             resp.conflict && resp.claimAvailable -> {
+                // ZS-diag: boundary 2c — conflict branch taken
+                android.util.Log.w("ZS-diag", "process branch: conflict=true claimAvailable=true productId=${d.productId}")
                 onConflictClaim(
                     PendingClaim(
                         productId = d.productId,
@@ -156,6 +197,11 @@ internal class PurchaseSyncProcessor(
                 Result.failure(ZeroSettleError.CheckoutFailed("ownership_conflict"))
             }
             else -> {
+                // ZS-diag: boundary 2c — not_owned branch taken
+                android.util.Log.w(
+                    "ZS-diag",
+                    "process branch: else/not_owned — owned=${resp.owned} conflict=${resp.conflict} claimAvailable=${resp.claimAvailable} productId=${d.productId}",
+                )
                 emitEvent(ZeroSettleEvent.PurchaseFailed(productId = d.productId, reason = "not_owned"))
                 onPurchaseFailed(ZeroSettleError.CheckoutFailed("not_owned"))
                 Result.failure(ZeroSettleError.CheckoutFailed("not_owned"))
@@ -167,6 +213,8 @@ internal class PurchaseSyncProcessor(
     public suspend fun retryQueued() {
         for (row in queue.pending()) {
             if (PlaySyncQueue.isAbandoned(row)) {
+                // ZS-diag: retryQueued — abandoned branch
+                android.util.Log.w("ZS-diag", "retryQueued: abandoned productId=${row.productId} token=${row.purchaseToken.take(12)} attempts=${row.attemptCount}")
                 if (!strictAck && row.lastAttemptAtMillis != null &&
                     nowMillis() - row.lastAttemptAtMillis >= DEFENSIVE_ACK_WINDOW_MILLIS
                 ) {
@@ -186,6 +234,8 @@ internal class PurchaseSyncProcessor(
             )
             syncRes.fold(
                 onSuccess = { resp ->
+                    // ZS-diag: retryQueued sync result
+                    android.util.Log.w("ZS-diag", "retryQueued syncResult: owned=${resp.owned} productId=${row.productId} token=${row.purchaseToken.take(12)}")
                     if (resp.owned) {
                         finalizeAndLog(row.productId, row.purchaseToken)
                         queue.remove(row.purchaseToken)
