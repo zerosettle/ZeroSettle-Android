@@ -24,23 +24,28 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.models.ProductType
+import io.zerosettle.justone.data.UserPrefs
 import io.zerosettle.justone.screens.paywall.CheckoutSheetHeader
 import io.zerosettle.justone.screens.paywall.DualPriceButtons
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConsumableShopScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val products by ZeroSettle.products.collectAsState()
-    val entitlements by ZeroSettle.entitlements.collectAsState()
 
     val consumables = products.filter { it.type == ProductType.CONSUMABLE }
-    val owned = entitlements.count { it.isActive && it.productType == "consumable" }
+    val owned by UserPrefs(ctx).streakSaverCount.collectAsState(initial = 0)
 
     Scaffold(
         topBar = {
@@ -96,7 +101,7 @@ fun ConsumableShopScreen(onBack: () -> Unit) {
                             Spacer(modifier = Modifier.height(12.dp))
                             DualPriceButtons(
                                 productId = product.id,
-                                onPurchased = { /* entitlements stream updates owned count automatically */ },
+                                onPurchased = { scope.launch { UserPrefs(ctx).addStreakSavers(1) } },
                             )
                         }
                     }

@@ -13,16 +13,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.zerosettle.sdk.ZeroSettle
+import io.zerosettle.justone.data.UserPrefs
 
 @Composable
 fun StreakSaverCard(
     onBuyMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val entitlements by ZeroSettle.entitlements.collectAsState()
-    val owned = entitlements.count { it.isActive && it.productType == "consumable" }
+    val ctx = LocalContext.current
+    val owned by UserPrefs(ctx).streakSaverCount.collectAsState(initial = 0)
 
     Card(modifier = modifier.fillMaxWidth()) {
         Column(

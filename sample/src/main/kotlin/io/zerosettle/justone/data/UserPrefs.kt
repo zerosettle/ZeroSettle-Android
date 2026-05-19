@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlin.math.max
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -28,6 +29,7 @@ class UserPrefs(context: Context) {
         val REMINDER_MINUTE = intPreferencesKey("reminder_time_minute")
         val PAYWALL_DISMISSED_AT = longPreferencesKey("launch_paywall_dismissed_at")
         val SEEDED = booleanPreferencesKey("seeded")
+        val STREAK_SAVER_COUNT = intPreferencesKey("streak_saver_count")
     }
 
     data class Identity(val userId: String, val displayName: String, val email: String)
@@ -45,6 +47,7 @@ class UserPrefs(context: Context) {
 
     val paywallDismissedAt: Flow<Long?> = ctx.dataStore.data.map { it[Keys.PAYWALL_DISMISSED_AT] }
     val seeded: Flow<Boolean> = ctx.dataStore.data.map { it[Keys.SEEDED] ?: false }
+    val streakSaverCount: Flow<Int> = ctx.dataStore.data.map { it[Keys.STREAK_SAVER_COUNT] ?: 0 }
 
     suspend fun saveIdentity(userId: String, displayName: String, email: String) {
         ctx.dataStore.edit {
@@ -76,5 +79,22 @@ class UserPrefs(context: Context) {
 
     suspend fun setSeeded(value: Boolean) {
         ctx.dataStore.edit { it[Keys.SEEDED] = value }
+    }
+
+    suspend fun addStreakSavers(count: Int = 1) {
+        ctx.dataStore.edit { it[Keys.STREAK_SAVER_COUNT] = (it[Keys.STREAK_SAVER_COUNT] ?: 0) + count }
+    }
+
+    /** Decrements the balance by 1. Returns true if a saver was consumed, false if already at 0. */
+    suspend fun useStreakSaver(): Boolean {
+        var consumed = false
+        ctx.dataStore.edit {
+            val current = it[Keys.STREAK_SAVER_COUNT] ?: 0
+            if (current > 0) {
+                it[Keys.STREAK_SAVER_COUNT] = max(0, current - 1)
+                consumed = true
+            }
+        }
+        return consumed
     }
 }

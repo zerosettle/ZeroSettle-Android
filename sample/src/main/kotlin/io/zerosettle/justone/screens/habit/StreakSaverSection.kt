@@ -5,22 +5,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.zerosettle.sdk.ZeroSettle
 import io.zerosettle.justone.data.Habit
+import io.zerosettle.justone.data.UserPrefs
+import kotlinx.coroutines.launch
 
 @Composable
 fun StreakSaverSection(habit: Habit, modifier: Modifier = Modifier) {
-    val entitlements by ZeroSettle.entitlements.collectAsState()
-    val streakSavers = entitlements.filter { it.isActive && it.productType == "consumable" }
-    if (streakSavers.isEmpty()) return
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val count by UserPrefs(ctx).streakSaverCount.collectAsState(initial = 0)
+    if (count == 0) return
 
     Card(modifier = modifier.fillMaxWidth()) {
         Column(
@@ -35,11 +40,18 @@ fun StreakSaverSection(habit: Habit, modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "You have ${streakSavers.size} streak saver${if (streakSavers.size == 1) "" else "s"} — " +
-                    "they protect a missed week from breaking your streak on \"${habit.name}\".",
+                text = "You have $count streak saver${if (count == 1) "" else "s"}. " +
+                    "Using one protects a missed week from breaking your streak on \"${habit.name}\".",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = { scope.launch { ctx.let { UserPrefs(it).useStreakSaver() } } },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Use streak saver")
+            }
         }
     }
 }
