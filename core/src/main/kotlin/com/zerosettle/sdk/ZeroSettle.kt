@@ -168,15 +168,7 @@ public object ZeroSettle {
             // routing consumables to acknowledge and trapping re-purchase in
             // ITEM_ALREADY_OWNED.
             productTypeLookup = { sku ->
-                // ZS-diag: boundary 3 supplement — catalog visibility at productTypeLookup call
-                val catalog = _products.value
-                val pairs = catalog.map { it.id to it.playProductId }
-                val resolved = com.zerosettle.sdk.billing.productTypeForPlaySku(catalog, sku)
-                android.util.Log.w(
-                    "ZS-diag",
-                    "productTypeLookup: sku=$sku catalogSize=${catalog.size} pairs=$pairs resolvedType=$resolved",
-                )
-                resolved
+                com.zerosettle.sdk.billing.productTypeForPlaySku(_products.value, sku)
             },
             onEntitlementsMayHaveChanged = {
                 scope.scope.launch { restoreEntitlements() }
@@ -188,16 +180,8 @@ public object ZeroSettle {
             // when the listener-driven sync confirms or fails. `?.complete` /
             // `?.completeExceptionally` are no-ops when the slot is null — that's
             // the redelivery-on-relaunch path (no awaiter armed for this purchase).
-            onPurchaseSynced = { txnId ->
-                // ZS-diag: boundary 5 — deferred resolved with success
-                android.util.Log.w("ZS-diag", "onPurchaseSynced: transactionId=$txnId deferredArmed=${pendingPlayPurchaseDeferred != null}")
-                pendingPlayPurchaseDeferred?.complete(txnId)
-            },
-            onPurchaseFailed = { err ->
-                // ZS-diag: boundary 5 — deferred resolved with failure
-                android.util.Log.w("ZS-diag", "onPurchaseFailed: ${err.javaClass.simpleName}: ${err.message} deferredArmed=${pendingPlayPurchaseDeferred != null}")
-                pendingPlayPurchaseDeferred?.completeExceptionally(err)
-            },
+            onPurchaseSynced = { txnId -> pendingPlayPurchaseDeferred?.complete(txnId) },
+            onPurchaseFailed = { err -> pendingPlayPurchaseDeferred?.completeExceptionally(err) },
             ucbConfig = ucbCfg,
             ucbCheckoutLauncher = com.zerosettle.sdk.billing.StripeCheckoutLauncher(
                 context = ctx,
@@ -985,15 +969,10 @@ public object ZeroSettle {
         // fetchTransaction would leak the slot and lock out future calls.
         try {
             val transactionId: String = try {
-                val txnId = deferred.await()
-                // ZS-diag: boundary 5 — deferred.await() completed successfully
-                android.util.Log.w("ZS-diag", "purchaseViaPlayBilling deferred.await() success: transactionId=$txnId")
-                txnId
+                deferred.await()
             } catch (e: ZeroSettleError) {
                 // Bridge was completed exceptionally from the sync processor —
                 // surface as Result.failure rather than propagating.
-                // ZS-diag: boundary 5 — deferred.await() completed exceptionally
-                android.util.Log.w("ZS-diag", "purchaseViaPlayBilling deferred.await() failure: ${e.javaClass.simpleName}: ${e.message}")
                 return Result.failure(e)
             }
             // CancellationException intentionally propagates per Kotlin coroutine

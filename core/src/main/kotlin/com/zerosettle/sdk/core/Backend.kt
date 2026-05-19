@@ -324,22 +324,8 @@ internal class Backend(
             willAutoRenew = willAutoRenew, customerName = customerName, customerEmail = customerEmail,
         )
         val body = json.encodeToString(PlaySyncRequest.serializer(), req)
-        val raw = http.post("/v1/iap/play-store-transactions/", body)
-        // ZS-diag: boundary 4 — raw HTTP response from /v1/iap/play-store-transactions/
-        raw.fold(
-            onSuccess = { responseBody ->
-                android.util.Log.w("ZS-diag", "Backend.syncPlayPurchase 2xx body=$responseBody")
-            },
-            onFailure = { err ->
-                val (statusCode, errBody) = if (err is ZeroSettleError.BackendError) {
-                    err.statusCode to err.body
-                } else {
-                    -1 to (err.message ?: "")
-                }
-                android.util.Log.w("ZS-diag", "Backend.syncPlayPurchase non-2xx status=$statusCode body=$errBody err=${err.javaClass.simpleName}")
-            },
-        )
-        return raw.mapDecode(PlaySyncResponse.serializer())
+        return http.post("/v1/iap/play-store-transactions/", body)
+            .mapDecode(PlaySyncResponse.serializer())
     }
 
     /**

@@ -164,14 +164,7 @@ internal class PlayBillingCoordinator(
     private val processor = PurchaseSyncProcessor(
         backend = backend, queue = queue,
         finalize = { productId, token ->
-            // ZS-diag: boundary 3 — finalize routing decision
-            val resolvedType = productTypeLookup(productId)
-            val consumable = isConsumable(productId, productTypeLookup)
-            android.util.Log.w(
-                "ZS-diag",
-                "finalize: productId=$productId resolvedType=$resolvedType isConsumable=$consumable → ${if (consumable) "consume" else "acknowledge"}",
-            )
-            if (consumable) billing.consume(token)
+            if (isConsumable(productId, productTypeLookup)) billing.consume(token)
             else billing.acknowledge(token)
         },
         emitEvent = emitEvent, onConflictClaim = onPendingClaim,
@@ -198,13 +191,8 @@ internal class PlayBillingCoordinator(
     suspend fun purchaseViaPlayBilling(activity: Activity, product: Product): Result<Unit> {
         val playProductId = product.playProductId ?: product.id
         val billingProductType = playBillingProductType(product)
-        android.util.Log.w("ZS-debug", "queryProductDetails(playProductId=$playProductId, productType=$billingProductType)")
         val detailsResult = billing.queryProductDetails(listOf(playProductId), billingProductType)
-        detailsResult.onFailure { ex ->
-            android.util.Log.w("ZS-debug", "queryProductDetails FAILED: ${ex.javaClass.simpleName}: ${ex.message}")
-        }
         val details = detailsResult.getOrElse { return Result.failure(it) }
-        android.util.Log.w("ZS-debug", "queryProductDetails returned ${details.size} item(s)")
         val match = details.firstOrNull() ?: return Result.failure(ZeroSettleError.ProductNotFound(playProductId))
         return billing.launchBillingFlow(activity, match)
     }
