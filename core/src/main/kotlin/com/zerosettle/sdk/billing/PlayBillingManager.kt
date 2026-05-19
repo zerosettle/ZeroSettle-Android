@@ -82,9 +82,9 @@ internal fun classifyPurchaseListenerResult(
  * Owns the [BillingClient]: connection lifecycle (with auto-reconnect),
  * `queryProductDetails`, `launchBillingFlow` (with the deterministic
  * `obfuscatedAccountId`), the [PurchasesUpdatedListener], `acknowledgePurchase`,
- * `consumeAsync`, and `queryPurchasesAsync` (used by [SubscriptionReconciler]).
+ * `consumeAsync`, and `queryPurchasesAsync`.
  *
- * Purchases observed via the listener (and via reconcile) are handed to
+ * Purchases observed via the listener are handed to
  * [onPurchases]; the SDK wires that to [PurchaseSyncProcessor]. Finalization is
  * NOT done here automatically — the processor calls [acknowledge] or [consume]
  * (routed by product type in [PlayBillingCoordinator]) only after backend
@@ -239,7 +239,7 @@ public class PlayBillingManager(
         else Result.failure(mapBillingError(res.billingResult.responseCode, res.billingResult.debugMessage))
     }
 
-    /** Query all current purchases of [productType] (SUBS / INAPP). Used by the reconciler. */
+    /** Query all current purchases of [productType] (SUBS / INAPP). */
     public suspend fun queryPurchases(productType: String): Result<List<Purchase>> {
         ensureConnected().getOrElse { return Result.failure(it) }
         val res = client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(productType).build())

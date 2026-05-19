@@ -85,10 +85,10 @@ internal fun productTypeForPlaySku(products: List<Product>, playSku: String): Pr
  * the connection ended on `logout()` ([shutdown]).
  *
  * Responsibilities: install the [PlayBillingManager] purchase listener → route each
- * observed purchase through [PurchaseSyncProcessor]; run [SubscriptionReconciler] on
- * [start] and after each purchase event; drain the [PlaySyncQueue] on [start], on
- * network regain (via [ConnectivityManager.NetworkCallback]), and after each purchase
- * event.
+ * observed purchase through [PurchaseSyncProcessor]; drain the [PlaySyncQueue] on
+ * [start], on network regain (via [ConnectivityManager.NetworkCallback]), and after
+ * each purchase event. Post-purchase entitlement refresh is signalled via
+ * [onEntitlementsMayHaveChanged].
  */
 internal class PlayBillingCoordinator(
     private val context: Context,
@@ -172,17 +172,14 @@ internal class PlayBillingCoordinator(
         strictAck = strictAck, logger = logger,
     )
 
-    private val reconciler = SubscriptionReconciler(backend)
-
     private val connectivityManager get() = context.getSystemService(ConnectivityManager::class.java)
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    /** Called once after bootstrap. Connects, drains the queue, reconciles, registers the network callback. */
+    /** Called once after bootstrap. Connects, drains the queue, registers the network callback. */
     fun start() {
         scope.launch {
             billing.ensureConnected().onFailure { logger.warn("billing", "connect failed: ${it.message}") }
             processor.retryQueued()
-            runReconcile()
         }
         registerNetworkCallback()
     }
@@ -202,19 +199,18 @@ internal class PlayBillingCoordinator(
         for (p in purchases) {
             processor.process(PlayBillingManager.describePurchase(p, uid, customerNameProvider(), customerEmailProvider()))
         }
-        runReconcile()
         processor.retryQueued()
         onEntitlementsMayHaveChanged()
     }
 
     /**
      * Test-only: drive a single fake [Purchase] through [processor]. Skips the
-     * surrounding `runReconcile` + `retryQueued` calls — those invoke
-     * `BillingClient.queryPurchases` which goes through `ensureConnected` on a
-     * client that has no real Play services in Robolectric (would hang or fail
-     * loudly). The deferred-bridge wiring at [com.zerosettle.sdk.ZeroSettle]'s
-     * `onPurchaseSynced` / `onPurchaseFailed` callbacks lives entirely inside
-     * the `processor.process(...)` call, so the surrounding work isn't needed
+     * surrounding `retryQueued` call — it invokes `BillingClient.queryPurchases`
+     * which goes through `ensureConnected` on a client that has no real Play
+     * services in Robolectric (would hang or fail loudly). The deferred-bridge
+     * wiring at [com.zerosettle.sdk.ZeroSettle]'s `onPurchaseSynced` /
+     * `onPurchaseFailed` callbacks lives entirely inside the
+     * `processor.process(...)` call, so the surrounding work isn't needed
      * for that contract test.
      */
     internal suspend fun processPurchaseForTesting(purchase: Purchase) {
@@ -232,19 +228,6 @@ internal class PlayBillingCoordinator(
      */
     internal fun simulateListenerForTesting(responseCode: Int, debugMessage: String, purchases: List<Purchase>?) {
         billing.simulateListenerForTesting(responseCode, debugMessage, purchases)
-    }
-
-    private suspend fun runReconcile() {
-        val uid = userIdProvider() ?: return
-        val subs = billing.queryPurchases(BillingClient.ProductType.SUBS).getOrDefault(emptyList())
-        val inapp = billing.queryPurchases(BillingClient.ProductType.INAPP).getOrDefault(emptyList())
-        val all = (subs + inapp).map {
-            ReconcilePurchase(
-                purchaseToken = it.purchaseToken, productId = it.products.firstOrNull().orEmpty(),
-                packageName = it.packageName, originalJson = it.originalJson, signature = it.signature,
-            )
-        }
-        reconciler.reconcile(uid, all).onSuccess { onEntitlementsMayHaveChanged() }
     }
 
     private fun registerNetworkCallback() {

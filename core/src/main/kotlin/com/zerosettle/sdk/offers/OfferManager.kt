@@ -21,7 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * **Play→web migrations: the SDK does NOT cancel the Play subscription.** The
  * backend does that via `subscriptionsv2.cancel` after the web checkout's
  * `payment_intent.succeeded`. The manager just waits for the Play sub's auto-renew
- * to flip off ([playSubAutoRenewOff], fed by the Play reconcile) to transition
+ * to flip off ([playSubAutoRenewOff], read from the current Play entitlement's
+ * `willRenew` flag) to transition
  * `ACCEPTED → COMPLETED`. For `upgrade_web_to_web` there's no store cancel and no
  * WebView — `acceptOffer()` calls `POST /v1/iap/upgrade-offer/execute/` then goes
  * straight to `COMPLETED`.
@@ -187,8 +188,8 @@ public class OfferManager internal constructor(
 
     /**
      * Re-check whether the source store subscription's auto-renew has flipped off (the
-     * backend cancelled it). If so, transition `ACCEPTED → COMPLETED`. Called by the
-     * Play reconcile loop after each refresh, and by [onWebCheckoutSucceeded].
+     * backend cancelled it). If so, transition `ACCEPTED → COMPLETED`. Called by
+     * [onWebCheckoutSucceeded].
      */
     public fun observeStoreCancellation() {
         if (_state.value != OfferState.ACCEPTED) return
