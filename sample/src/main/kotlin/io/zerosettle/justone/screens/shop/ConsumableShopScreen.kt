@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.ZeroSettle
+import com.zerosettle.sdk.models.Product
 import com.zerosettle.sdk.models.ProductType
 import io.zerosettle.justone.data.UserPrefs
 import io.zerosettle.justone.screens.paywall.CheckoutSheetHeader
@@ -101,7 +102,11 @@ fun ConsumableShopScreen(onBack: () -> Unit) {
                             Spacer(modifier = Modifier.height(12.dp))
                             DualPriceButtons(
                                 productId = product.id,
-                                onPurchased = { scope.launch { UserPrefs(ctx).addStreakSavers(1) } },
+                                onPurchased = {
+                                    scope.launch {
+                                        UserPrefs(ctx).addStreakSavers(streakSaverGrant(product))
+                                    }
+                                },
                             )
                         }
                     }
@@ -110,3 +115,16 @@ fun ConsumableShopScreen(onBack: () -> Unit) {
         }
     }
 }
+
+/**
+ * The number of streak savers a given consumable grants.
+ *
+ * The two streak-saver products are `…streaksaver1` and `…streaksaver5`, so
+ * the grant amount is the trailing integer of the product id. A real app
+ * would model the grant amount explicitly per product (a server-side
+ * property or a local lookup table) — parsing it out of the id is a sample
+ * convenience that only holds because of this naming convention. Falls back
+ * to 1 for any id that doesn't end in a number.
+ */
+private fun streakSaverGrant(product: Product): Int =
+    Regex("(\\d+)$").find(product.id)?.value?.toIntOrNull()?.coerceAtLeast(1) ?: 1
