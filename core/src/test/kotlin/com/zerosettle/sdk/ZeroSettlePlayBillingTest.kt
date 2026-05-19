@@ -98,7 +98,7 @@ class ZeroSettlePlayBillingTest {
             "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
             // syncPlayPurchase response: owned=true plus a transactionId
             "/v1/iap/play-store-transactions/" to { MockResponse().setBody(
-                """{"owned":true,"transaction_id":"txn_play_1"}""",
+                """{"owned":true,"transaction_id":9101}""",
             ) },
         ))
         ZeroSettle.identify(Identity.User(id = "u1"))
@@ -113,7 +113,7 @@ class ZeroSettlePlayBillingTest {
         ZeroSettle.playCoordinator!!.processPurchaseForTesting(fakePurchase(token = "tok_1"))
 
         val txnId = withTimeout(5000) { deferred.await() }
-        assertThat(txnId).isEqualTo("txn_play_1")
+        assertThat(txnId).isEqualTo("9101")
     }
 
     @Test fun deferredBridge_notOwnedResponse_failsAwaiter() = runTest {
@@ -237,7 +237,7 @@ class ZeroSettlePlayBillingTest {
         // hangs and fails with timeout.
         val queue = com.zerosettle.sdk.billing.PlaySyncQueue(ApplicationProvider.getApplicationContext()).also { it.clear() }
         val backend = com.zerosettle.sdk.core.Backend(server.url("/").toString().trimEnd('/'), "zs_pk_test_abc", "1.0.0")
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_ack_throw"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":9102}"""))
 
         val deferred = kotlinx.coroutines.CompletableDeferred<String>()
         val proc = com.zerosettle.sdk.billing.PurchaseSyncProcessor(
@@ -260,6 +260,6 @@ class ZeroSettlePlayBillingTest {
             ),
         )
         val txnId = withTimeout(5000) { deferred.await() }
-        assertThat(txnId).isEqualTo("txn_ack_throw")
+        assertThat(txnId).isEqualTo("9102")
     }
 }

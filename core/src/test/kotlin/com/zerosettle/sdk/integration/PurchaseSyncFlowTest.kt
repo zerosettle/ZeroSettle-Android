@@ -49,7 +49,7 @@ class PurchaseSyncFlowTest {
     )
 
     @Test fun happyPath_syncSucceeds_acksAndDrainsQueue() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_flow","entitlement_id":"ent_flow"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":4101,"entitlement_id":4102}"""))
         val res = processor().process(descriptor())
         assertThat(res.isSuccess).isTrue()
         assertThat(acked).containsExactly("tok_flow")
@@ -71,7 +71,7 @@ class PurchaseSyncFlowTest {
         assertThat(queue.pending()).hasSize(1)
 
         // Backend back up — retryQueued drains it. backoff for attempt 1 is 5s; nowMillis=10s clears the gate.
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_flow"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":4101}"""))
         processor(now = { 10_000L }).retryQueued()
         assertThat(acked).contains("tok_flow")
         assertThat(queue.pending()).isEmpty()

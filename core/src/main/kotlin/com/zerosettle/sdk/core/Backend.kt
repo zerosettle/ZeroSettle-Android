@@ -473,22 +473,27 @@ internal data class PlaySyncRequest(
 /**
  * Response from `POST /v1/iap/play-store-transactions/`.
  *
- * **WIRE-SHAPE DIVERGENCE (audit task #115):** the backend handler today
- * synchronously returns only `{status: "queued", event_id: <int>}` (HTTP 202 —
- * the actual sync runs in a Celery worker on the shared Pub/Sub topic). The
- * SDK fields below are aspirational — every one carries a default, so decode
- * succeeds but `owned`/`transactionId`/etc. are always the default values
- * today. The SDK's purchase flow currently relies on the BillingClient
- * listener + the deferred-bridge in `PlayBillingCoordinator` (see
- * `onPurchaseSynced`) instead of this response. Realigning means either (a)
- * making the endpoint synchronous in the Play SDK path, or (b) reshaping the
- * SDK to wait on the listener exclusively and dropping these fields.
+ * The endpoint is **fully synchronous**: it processes the Play purchase
+ * inline and returns HTTP 200 with the complete body
+ * `{status, owned, transaction_id, entitlement_id, conflict,
+ * claim_available, existing_owner_hint, is_sandbox}`. The SDK's purchase
+ * flow reads `owned`/`conflict`/`claimAvailable` directly off this response
+ * (see `PurchaseSyncProcessor.process`) to resolve the deferred-bridge in
+ * `PlayBillingCoordinator` (`onPurchaseSynced` / `onPurchaseFailed`).
+ *
+ * **Wire types:** `transaction_id` and `entitlement_id` are Django model
+ * PKs — JSON **integers** (`BigAutoField` → [Long]), or `null`. They are
+ * NOT strings: the SDK's strict [Json] config (no `isLenient`, no
+ * `coerceInputValues`) throws `JsonDecodingException` if an unquoted JSON
+ * number is decoded into a `String` property, so these MUST stay [Long].
+ * Consumable purchases return `entitlement_id: null` (no entitlement row),
+ * which [Long]? accepts. Adapt to `String` at call sites with `?.toString()`.
  */
 @Serializable
 internal data class PlaySyncResponse(
     val owned: Boolean = false,
-    @SerialName("transaction_id") val transactionId: String? = null,
-    @SerialName("entitlement_id") val entitlementId: String? = null,
+    @SerialName("transaction_id") val transactionId: Long? = null,
+    @SerialName("entitlement_id") val entitlementId: Long? = null,
     @SerialName("is_sandbox") val isSandbox: Boolean = false,
     val conflict: Boolean = false,
     @SerialName("claim_available") val claimAvailable: Boolean = false,

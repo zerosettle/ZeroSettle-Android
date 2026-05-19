@@ -156,7 +156,7 @@ internal class PurchaseSyncProcessor(
                 // ZS-diag: boundary 2c — owned branch taken
                 android.util.Log.w("ZS-diag", "process branch: owned=true → will finalize productId=${d.productId}")
                 queue.remove(d.purchaseToken)
-                val txnId = resp.transactionId ?: ""
+                val txnId = resp.transactionId?.toString() ?: ""
                 // Resolve the awaiter FIRST — as soon as OUR backend has recorded
                 // the purchase the user-visible operation is done. The local Play
                 // ack that follows is bookkeeping that satisfies the 3-day window
@@ -189,7 +189,7 @@ internal class PurchaseSyncProcessor(
                 onConflictClaim(
                     PendingClaim(
                         productId = d.productId,
-                        originalTransactionId = resp.transactionId ?: d.orderId.orEmpty(),
+                        originalTransactionId = resp.transactionId?.toString() ?: d.orderId.orEmpty(),
                         existingOwnerHint = resp.existingOwnerHint ?: "another account",
                     ),
                 )
@@ -239,7 +239,7 @@ internal class PurchaseSyncProcessor(
                     if (resp.owned) {
                         finalizeAndLog(row.productId, row.purchaseToken)
                         queue.remove(row.purchaseToken)
-                        emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = row.productId, transactionId = resp.transactionId ?: ""))
+                        emitEvent(ZeroSettleEvent.PurchaseSucceeded(productId = row.productId, transactionId = resp.transactionId?.toString() ?: ""))
                     } else {
                         queue.recordFailure(row.purchaseToken, nowMillis())
                     }

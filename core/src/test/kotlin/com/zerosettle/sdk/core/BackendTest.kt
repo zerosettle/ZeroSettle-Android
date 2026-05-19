@@ -82,28 +82,71 @@ class BackendTest {
         assertThat(body).contains("\"action_type\":\"info_banner_dismissed\"")
     }
 
+    private suspend fun callSyncPlayPurchase() = backend.syncPlayPurchase(
+        userId = "u1",
+        purchaseToken = "tok",
+        productId = "pro_monthly",
+        packageName = "com.app",
+        orderId = "GPA",
+        purchaseState = 1,
+        isAcknowledged = false,
+        signature = "sig",
+        originalJson = "{}",
+        willAutoRenew = true,
+        customerName = null,
+        customerEmail = null,
+    )
+
     @Test fun syncPlayPurchase_postsAndDecodesResponse() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_1"}"""))
-        val res = backend.syncPlayPurchase(
-            userId = "u1",
-            purchaseToken = "tok",
-            productId = "pro_monthly",
-            packageName = "com.app",
-            orderId = "GPA",
-            purchaseState = 1,
-            isAcknowledged = false,
-            signature = "sig",
-            originalJson = "{}",
-            willAutoRenew = true,
-            customerName = null,
-            customerEmail = null,
-        )
+        // transaction_id is a Django PK — a JSON integer, not a quoted string.
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7296}"""))
+        val res = callSyncPlayPurchase()
         assertThat(res.getOrNull()?.owned).isTrue()
+        assertThat(res.getOrNull()?.transactionId).isEqualTo(7296L)
         val recorded = server.takeRequest()
         assertThat(recorded.path).isEqualTo("/v1/iap/play-store-transactions/")
         val body = recorded.body.readUtf8()
         assertThat(body).contains("\"purchase_token\":\"tok\"")
         assertThat(body).contains("\"package_name\":\"com.app\"")
+    }
+
+    /**
+     * RC-E regression: the backend returns `transaction_id`/`entitlement_id`
+     * as JSON integers (Django PKs). Decoding them into `String` properties
+     * under the SDK's strict `Json` config throws `JsonDecodingException`,
+     * which made every Play sync return `Result.failure` on an HTTP 200 —
+     * so consumable purchases never reported `owned=true`. These cases lock
+     * in the realistic full-body wire shape.
+     */
+    @Test fun syncPlayPurchase_decodesConsumableResponseWithNullEntitlement() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":"ok","owned":true,"transaction_id":7296,"entitlement_id":null,
+                   "conflict":false,"claim_available":false,"existing_owner_hint":null,"is_sandbox":true}""",
+            ),
+        )
+        val res = callSyncPlayPurchase()
+        assertThat(res.isSuccess).isTrue()
+        val resp = res.getOrThrow()
+        assertThat(resp.owned).isTrue()
+        assertThat(resp.transactionId).isEqualTo(7296L)
+        assertThat(resp.entitlementId).isNull()
+        assertThat(resp.isSandbox).isTrue()
+    }
+
+    @Test fun syncPlayPurchase_decodesNonConsumableResponseWithIntegerEntitlementId() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":"ok","owned":true,"transaction_id":8401,"entitlement_id":512,
+                   "conflict":false,"claim_available":false,"existing_owner_hint":null,"is_sandbox":false}""",
+            ),
+        )
+        val res = callSyncPlayPurchase()
+        assertThat(res.isSuccess).isTrue()
+        val resp = res.getOrThrow()
+        assertThat(resp.owned).isTrue()
+        assertThat(resp.transactionId).isEqualTo(8401L)
+        assertThat(resp.entitlementId).isEqualTo(512L)
     }
 
     @Test fun initiatePlayUcb_postsBodyAndDecodesResponse() = runTest {

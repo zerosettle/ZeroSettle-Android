@@ -54,7 +54,7 @@ class PurchaseSyncProcessorTest {
     @After fun tearDown() { server.shutdown() }
 
     @Test fun process_ownedTrue_acknowledgesAndDoesNotEnqueue() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_1"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7001}"""))
         val res = makeProcessor().process(descriptor())
         assertThat(res.isSuccess).isTrue()
         assertThat(acked).containsExactly("tok1")
@@ -101,9 +101,9 @@ class PurchaseSyncProcessorTest {
     // current-session deferred with an unrelated transactionId would be wrong.
 
     @Test fun process_ownedTrue_firesOnPurchaseSynced_withTransactionId() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_1"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7001}"""))
         makeProcessor().process(descriptor())
-        assertThat(resolvedTransactionIds).containsExactly("txn_1")
+        assertThat(resolvedTransactionIds).containsExactly("7001")
         assertThat(resolvedExceptions).isEmpty()
     }
 
@@ -148,7 +148,7 @@ class PurchaseSyncProcessorTest {
         // transactionIds would deliver the wrong purchase. This pins that the
         // queue-drain success path never calls onPurchaseSynced/Failed.
         queue.enqueue(PendingPurchaseSync("tok_old", "pro_monthly", "com.app", "u1"))
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_from_prior_session"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7002}"""))
         makeProcessor().retryQueued()
         assertThat(resolvedTransactionIds).isEmpty()
         assertThat(resolvedExceptions).isEmpty()
@@ -186,7 +186,7 @@ class PurchaseSyncProcessorTest {
     }
 
     @Test fun process_finalizeReturnsFailure_isLogged() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_1"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7001}"""))
         val log = CapturingLogger()
         val proc = PurchaseSyncProcessor(
             backend = backend, queue = queue,
@@ -202,7 +202,7 @@ class PurchaseSyncProcessorTest {
     }
 
     @Test fun process_finalizeThrows_isLoggedAndDoesNotCrashSync() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":"txn_1"}"""))
+        server.enqueue(MockResponse().setBody("""{"owned":true,"transaction_id":7001}"""))
         val log = CapturingLogger()
         val proc = PurchaseSyncProcessor(
             backend = backend, queue = queue,
