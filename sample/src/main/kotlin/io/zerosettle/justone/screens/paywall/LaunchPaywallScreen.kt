@@ -15,16 +15,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.ZeroSettle
-import com.zerosettle.sdk.models.ProductType
 import io.zerosettle.justone.data.UserPrefs
 import kotlinx.coroutines.launch
 
@@ -34,7 +38,14 @@ fun LaunchPaywallScreen(onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     val products by ZeroSettle.products.collectAsState()
-    val subscription = products.firstOrNull { it.type == ProductType.AUTO_RENEWABLE_SUBSCRIPTION }
+    val plans = remember(products) { subscriptionPlans(products) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(plans) {
+        if (selectedId == null || plans.none { it.id == selectedId }) {
+            selectedId = defaultPlanId(plans)
+        }
+    }
+    val selected = plans.firstOrNull { it.id == selectedId }
 
     Column(
         modifier = Modifier
@@ -69,16 +80,25 @@ fun LaunchPaywallScreen(onDone: () -> Unit) {
 
         // Subscription section
         Column(modifier = Modifier.fillMaxWidth()) {
-            if (subscription != null) {
+            if (selected != null) {
                 CheckoutSheetHeader(
-                    product = subscription,
+                    product = selected,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                PlanSelector(
+                    plans = plans,
+                    selectedId = selected.id,
+                    onSelect = { selectedId = it },
                     modifier = Modifier.fillMaxWidth(),
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
                 DualPriceButtons(
-                    productId = subscription.id,
+                    productId = selected.id,
                     onPurchased = onDone,
                     modifier = Modifier.fillMaxWidth(),
                 )
