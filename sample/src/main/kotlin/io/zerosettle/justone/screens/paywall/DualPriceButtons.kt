@@ -1,5 +1,8 @@
 package io.zerosettle.justone.screens.paywall
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +30,18 @@ import com.zerosettle.sdk.ZeroSettle
 import kotlinx.coroutines.launch
 
 /**
+ * Walks the [ContextWrapper] chain to the host [Activity]. Needed because
+ * `LocalContext.current` inside a ModalBottomSheet (or any Dialog) is the
+ * dialog's ContextThemeWrapper, not the Activity — a direct `as Activity`
+ * cast there throws ClassCastException.
+ */
+internal tailrec fun Context.findActivity(): Activity = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> error("No Activity found in the Context chain")
+}
+
+/**
  * Renders the purchase button(s) for a given product, adapting to UCB state.
  *
  * When UCB is enabled and a Play SKU is available, a single "Buy" button is shown — Google's
@@ -42,7 +57,7 @@ fun DualPriceButtons(
     onPurchased: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val activity = LocalContext.current as android.app.Activity
+    val activity = LocalContext.current.findActivity()
     val products by ZeroSettle.products.collectAsState()
     val product = remember(products) { ZeroSettle.product(productId) }
     val ucbEnabled by ZeroSettle.isUcbEnabled.collectAsState()
