@@ -26,9 +26,34 @@ public object ZeroSettleDefaults {
     public fun offerAccentColor(): Color = Color(0xFF6CA358)
 }
 
-internal val LocalZeroSettleStyles = staticCompositionLocalOf<ZeroSettleStyles> {
-    error("LocalZeroSettleStyles not provided — wrap UI in ZeroSettleTheme { }")
-}
+/**
+ * Host-provided styles, or `null` when no [ZeroSettleTheme] wraps the call
+ * site. ZeroSettle UI components MUST resolve styling through
+ * [resolvedZeroSettleStyles] rather than reading this directly — that keeps
+ * them drop-in (a missing [ZeroSettleTheme] degrades to Material-derived
+ * defaults instead of crashing).
+ */
+internal val LocalZeroSettleStyles = staticCompositionLocalOf<ZeroSettleStyles?> { null }
+
+/** Material-derived [ZeroSettleStyles] — the defaults when nothing overrides them. */
+@Composable
+internal fun defaultZeroSettleStyles(): ZeroSettleStyles = ZeroSettleStyles(
+    offerAccentColor = ZeroSettleDefaults.offerAccentColor(),
+    offerSurfaceColor = MaterialTheme.colorScheme.surfaceVariant,
+    offerTitleStyle = MaterialTheme.typography.titleMedium,
+    offerBodyStyle = MaterialTheme.typography.bodyMedium,
+    offerCtaStyle = MaterialTheme.typography.labelLarge,
+)
+
+/**
+ * The active [ZeroSettleStyles] for a ZeroSettle UI component — the
+ * host-provided styles from an enclosing [ZeroSettleTheme], or
+ * [defaultZeroSettleStyles] when there is no such wrapper. Components call
+ * this so they render correctly whether or not the host opted into theming.
+ */
+@Composable
+internal fun resolvedZeroSettleStyles(): ZeroSettleStyles =
+    LocalZeroSettleStyles.current ?: defaultZeroSettleStyles()
 
 /**
  * Wrap ZeroSettle UI components in this. Inherits the surrounding `MaterialTheme` and
@@ -50,12 +75,6 @@ public fun ZeroSettleTheme(
     styles: ZeroSettleStyles? = null,
     content: @Composable () -> Unit,
 ) {
-    val resolved = styles ?: ZeroSettleStyles(
-        offerAccentColor = ZeroSettleDefaults.offerAccentColor(),
-        offerSurfaceColor = MaterialTheme.colorScheme.surfaceVariant,
-        offerTitleStyle = MaterialTheme.typography.titleMedium,
-        offerBodyStyle = MaterialTheme.typography.bodyMedium,
-        offerCtaStyle = MaterialTheme.typography.labelLarge,
-    )
+    val resolved = styles ?: defaultZeroSettleStyles()
     CompositionLocalProvider(LocalZeroSettleStyles provides resolved, content = content)
 }

@@ -23,7 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.models.UserOffer
 import com.zerosettle.sdk.offers.OfferManager
-import com.zerosettle.ui.theme.LocalZeroSettleStyles
+import com.zerosettle.ui.theme.resolvedZeroSettleStyles
 import kotlinx.coroutines.launch
 
 /**
@@ -98,7 +98,7 @@ public fun ZeroSettleOfferTipContent(
     accentColor: Color? = null,
     showCompletedCard: Boolean = true,
 ) {
-    val styles = LocalZeroSettleStyles.current
+    val styles = resolvedZeroSettleStyles()
     val accent = accentColor ?: styles.offerAccentColor
     val surface = backgroundColor ?: styles.offerSurfaceColor
     val titleStyle = styles.offerTitleStyle ?: MaterialTheme.typography.titleMedium
