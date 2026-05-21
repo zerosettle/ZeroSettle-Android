@@ -59,6 +59,17 @@ public fun ZeroSettleOfferTip(
 
     LaunchedEffect(checkoutError) { checkoutError?.let(onError) }
 
+    // Self-trigger eligibility resolution when the tip enters composition.
+    // OfferManager is a pure, host-driven state machine — it starts in
+    // LOADING with no offer data and never fetches until evaluate() is
+    // called. Without this, a host that simply drops ZeroSettleOfferTip onto
+    // a screen sees nothing (the `offer ?: return` below short-circuits).
+    // Mirrors iOS, where ZSOfferManager self-evaluates via its observation
+    // tracking rather than requiring each host screen to wire it. The
+    // offerManager instance is stable (hosts share one), so this runs once
+    // per tip placement, not on every recomposition.
+    LaunchedEffect(offerManager) { offerManager.evaluate() }
+
     val data = offer ?: return
     ZeroSettleOfferTipContent(
         state = state,
