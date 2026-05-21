@@ -1,12 +1,17 @@
 package com.zerosettle.sdk.billing
 
+import android.app.Activity
 import android.content.Context
+import android.net.Uri
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingProgramAvailabilityListener
 import com.android.billingclient.api.BillingProgramReportingDetailsListener
 import com.android.billingclient.api.BillingProgramReportingDetailsParams
 import com.android.billingclient.api.BillingResult
+import com.android.billingclient.api.LaunchExternalLinkParams
+import com.android.billingclient.api.LaunchExternalLinkResponseListener
+import com.zerosettle.sdk.checkout.WebCheckoutFlow
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -60,8 +65,15 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  *
  * @param client Pre-built [BillingClient] — primary constructor for injection
  *   (tests, custom configurations). Teardown is via [endConnection].
+ * @param launchCustomTab Custom-tab launch function. Defaults to
+ *   [WebCheckoutFlow.launchCustomTab]. Injected as a seam for unit tests so that
+ *   the `object`-scoped production implementation can be substituted without
+ *   a mocking framework.
  */
-public class ExternalContentLinkClient(private val client: BillingClient) {
+public class ExternalContentLinkClient(
+    private val client: BillingClient,
+    private val launchCustomTab: (Activity, String) -> Unit = WebCheckoutFlow::launchCustomTab,
+) {
 
     /**
      * Secondary convenience constructor: builds the dedicated ECL [BillingClient]
@@ -127,6 +139,32 @@ public class ExternalContentLinkClient(private val client: BillingClient) {
      */
     public fun endConnection() { client.endConnection() }
 
+    /**
+     * Launches the Google ECL disclosure dialog and, on the user's acknowledgement
+     * (`CALLER_WILL_LAUNCH_LINK`), opens [linkUri] in a Chrome Custom Tab.
+     *
+     * Internally:
+     * 1. Connects (or reuses an existing connection) via [connect].
+     * 2. Calls [BillingClient.launchExternalLink] with:
+     *    - `billingProgram = EXTERNAL_CONTENT_LINK`
+     *    - `linkType = LINK_TO_DIGITAL_CONTENT_OFFER`
+     *    - `launchMode = CALLER_WILL_LAUNCH_LINK` — Play shows Google's required
+     *      disclosure dialog and then hands control back to the caller to open the link.
+     * 3. On [BillingClient.BillingResponseCode.OK], opens [linkUri] via [launchCustomTab].
+     * 4. On any non-OK response code, returns [Result.failure] without opening the URL.
+     *
+     * Connection failures also return [Result.failure] without calling
+     * [BillingClient.launchExternalLink].
+     *
+     * @param activity The foreground [Activity] used to anchor the disclosure dialog.
+     * @param linkUri  The Switch & Save web checkout URL (must be the ECL-enrolled URL).
+     */
+    public suspend fun launch(activity: Activity, linkUri: Uri): Result<Unit> {
+        val connectOk = connect()
+        if (!connectOk) return Result.failure(IllegalStateException("ECL billing connection failed"))
+        return doLaunch(activity, linkUri)
+    }
+
     // ─── Private helpers ──────────────────────────────────────────────────────
 
     /**
@@ -191,4 +229,47 @@ public class ExternalContentLinkClient(private val client: BillingClient) {
             },
         )
     }
+
+    /**
+     * Bridges [BillingClient.launchExternalLink] into a suspend function.
+     *
+     * Builds [LaunchExternalLinkParams] with:
+     * - `billingProgram = EXTERNAL_CONTENT_LINK`
+     * - `linkType = LINK_TO_DIGITAL_CONTENT_OFFER` (verified from PBL 8.2.1 — note the
+     *   full name is `LINK_TO_DIGITAL_CONTENT_OFFER`, not `LINK_TO_DIGITAL_CONTENT`)
+     * - `launchMode = CALLER_WILL_LAUNCH_LINK` — Play shows Google's required disclosure
+     *   dialog and hands control back; the caller then opens the URL.
+     *
+     * On [BillingClient.BillingResponseCode.OK], opens [linkUri] in a Chrome Custom Tab
+     * via [launchCustomTab] and returns [Result.success].
+     * On any other response code, returns [Result.failure] without opening the URL.
+     */
+    private suspend fun doLaunch(activity: Activity, linkUri: Uri): Result<Unit> =
+        suspendCancellableCoroutine { cont ->
+            val params = LaunchExternalLinkParams.newBuilder()
+                .setBillingProgram(BillingClient.BillingProgram.EXTERNAL_CONTENT_LINK)
+                .setLinkType(LaunchExternalLinkParams.LinkType.LINK_TO_DIGITAL_CONTENT_OFFER)
+                .setLaunchMode(LaunchExternalLinkParams.LaunchMode.CALLER_WILL_LAUNCH_LINK)
+                .setLinkUri(linkUri)
+                .build()
+            client.launchExternalLink(
+                activity,
+                params,
+                LaunchExternalLinkResponseListener { result ->
+                    if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                        launchCustomTab(activity, linkUri.toString())
+                        cont.resume(Result.success(Unit))
+                    } else {
+                        cont.resume(
+                            Result.failure(
+                                IllegalStateException(
+                                    "launchExternalLink failed: " +
+                                        "responseCode=${result.responseCode} debugMessage=${result.debugMessage}",
+                                ),
+                            ),
+                        )
+                    }
+                },
+            )
+        }
 }

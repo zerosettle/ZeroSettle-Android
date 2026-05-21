@@ -1,5 +1,7 @@
 package com.zerosettle.sdk.billing
 
+import android.app.Activity
+import android.net.Uri
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.AcknowledgePurchaseResponseListener
 import com.android.billingclient.api.AlternativeBillingOnlyAvailabilityListener
@@ -32,6 +34,7 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 
 /**
@@ -72,6 +75,10 @@ class ExternalContentLinkClientTest {
      * [reportingToken] is the [externalTransactionToken] returned with a reporting OK response.
      * [connectionResponseCode] controls what [startConnection] fires (defaults to OK
      * so the connect step is transparent unless a test wants a connection failure).
+     * [launchResponseCode] controls what [launchExternalLink] fires (defaults to OK).
+     *
+     * [lastLaunchParams] captures the [LaunchExternalLinkParams] passed to [launchExternalLink]
+     * so tests can assert the correct BillingProgram/LinkType/LaunchMode/linkUri values.
      *
      * [BillingProgramAvailabilityDetails] and [BillingProgramReportingDetails] both
      * have package-private constructors in PBL 8.2.1, so we build them via reflection.
@@ -83,7 +90,16 @@ class ExternalContentLinkClientTest {
         private val reportingResponseCode: Int = BillingResponseCode.OK,
         private val reportingToken: String = "",
         private val connectionResponseCode: Int = BillingResponseCode.OK,
+        private val launchResponseCode: Int = BillingResponseCode.OK,
     ) : BillingClient() {
+
+        /** The params captured from the most recent [launchExternalLink] call. */
+        var lastLaunchParams: LaunchExternalLinkParams? = null
+            private set
+
+        /** Number of times [launchExternalLink] was called. */
+        var launchCallCount: Int = 0
+            private set
 
         override fun isReady(): Boolean = false
 
@@ -197,7 +213,13 @@ class ExternalContentLinkClientTest {
             activity: android.app.Activity,
             params: LaunchExternalLinkParams,
             listener: LaunchExternalLinkResponseListener,
-        ) = throw UnsupportedOperationException()
+        ) {
+            lastLaunchParams = params
+            launchCallCount++
+            listener.onLaunchExternalLinkResponse(
+                BillingResult.newBuilder().setResponseCode(launchResponseCode).build(),
+            )
+        }
 
         override fun queryProductDetailsAsync(
             params: QueryProductDetailsParams,
@@ -290,5 +312,83 @@ class ExternalContentLinkClientTest {
         )
         val result = client.newTransactionToken()
         assertThat(result.isFailure).isTrue()
+    }
+
+    // ─── launch() tests (Task 4) ──────────────────────────────────────────────
+
+    @Test fun launch_buildsCorrectParams() = runTest {
+        val fakeClient = FakeBillingClient(availabilityResponseCode = BillingClient.BillingResponseCode.OK)
+        val customTabCalls = mutableListOf<Pair<Activity, String>>()
+        val ecl = ExternalContentLinkClient(fakeClient) { activity, url ->
+            customTabCalls.add(activity to url)
+        }
+        val activity = Robolectric.buildActivity(Activity::class.java).get()
+        val uri = Uri.parse("https://checkout.zerosettle.io/ecl/test")
+
+        ecl.launch(activity, uri)
+
+        val params = fakeClient.lastLaunchParams
+        assertThat(params).isNotNull()
+        assertThat(params!!.billingProgram).isEqualTo(BillingClient.BillingProgram.EXTERNAL_CONTENT_LINK)
+        assertThat(params.linkType).isEqualTo(LaunchExternalLinkParams.LinkType.LINK_TO_DIGITAL_CONTENT_OFFER)
+        assertThat(params.launchMode).isEqualTo(LaunchExternalLinkParams.LaunchMode.CALLER_WILL_LAUNCH_LINK)
+        assertThat(params.linkUri).isEqualTo(uri)
+    }
+
+    @Test fun launch_onOkResult_invokesCustomTab() = runTest {
+        val fakeClient = FakeBillingClient(
+            availabilityResponseCode = BillingClient.BillingResponseCode.OK,
+            launchResponseCode = BillingClient.BillingResponseCode.OK,
+        )
+        val customTabCalls = mutableListOf<Pair<Activity, String>>()
+        val ecl = ExternalContentLinkClient(fakeClient) { activity, url ->
+            customTabCalls.add(activity to url)
+        }
+        val activity = Robolectric.buildActivity(Activity::class.java).get()
+        val uri = Uri.parse("https://checkout.zerosettle.io/ecl/test")
+
+        val result = ecl.launch(activity, uri)
+
+        assertThat(result.isSuccess).isTrue()
+        assertThat(customTabCalls).hasSize(1)
+        assertThat(customTabCalls[0].first).isSameInstanceAs(activity)
+        assertThat(customTabCalls[0].second).isEqualTo(uri.toString())
+    }
+
+    @Test fun launch_onNonOkResult_returnsFailureAndSkipsCustomTab() = runTest {
+        val fakeClient = FakeBillingClient(
+            availabilityResponseCode = BillingClient.BillingResponseCode.OK,
+            launchResponseCode = BillingClient.BillingResponseCode.DEVELOPER_ERROR,
+        )
+        val customTabCalls = mutableListOf<Pair<Activity, String>>()
+        val ecl = ExternalContentLinkClient(fakeClient) { activity, url ->
+            customTabCalls.add(activity to url)
+        }
+        val activity = Robolectric.buildActivity(Activity::class.java).get()
+        val uri = Uri.parse("https://checkout.zerosettle.io/ecl/test")
+
+        val result = ecl.launch(activity, uri)
+
+        assertThat(result.isFailure).isTrue()
+        assertThat(customTabCalls).isEmpty()
+    }
+
+    @Test fun launch_whenConnectionFails_returnsFailureAndSkipsLaunch() = runTest {
+        val fakeClient = FakeBillingClient(
+            availabilityResponseCode = BillingClient.BillingResponseCode.OK,
+            connectionResponseCode = BillingClient.BillingResponseCode.BILLING_UNAVAILABLE,
+        )
+        val customTabCalls = mutableListOf<Pair<Activity, String>>()
+        val ecl = ExternalContentLinkClient(fakeClient) { activity, url ->
+            customTabCalls.add(activity to url)
+        }
+        val activity = Robolectric.buildActivity(Activity::class.java).get()
+        val uri = Uri.parse("https://checkout.zerosettle.io/ecl/test")
+
+        val result = ecl.launch(activity, uri)
+
+        assertThat(result.isFailure).isTrue()
+        assertThat(fakeClient.launchCallCount).isEqualTo(0)
+        assertThat(customTabCalls).isEmpty()
     }
 }
