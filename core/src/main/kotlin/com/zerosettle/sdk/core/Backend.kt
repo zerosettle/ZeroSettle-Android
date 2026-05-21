@@ -299,6 +299,33 @@ internal class Backend(
     }
 
     /**
+     * `POST /v1/iap/switch-and-save/session/` — mints an opaque migration-session URL
+     * for the External Content Link Switch & Save flow.
+     *
+     * The SDK obtains a [externalTransactionToken] from Play Billing's ECL program and
+     * passes it here so the backend can attribute the subsequent web checkout to the
+     * user's Play account. The response contains a [SwitchAndSaveSessionResponse.migrationUrl]
+     * that is opened via [ExternalContentLinkClient.launch] — it carries an opaque
+     * session token only; no PII is embedded in the URL.
+     *
+     * **Note:** this endpoint is built in Task 9 and does not yet exist on the server.
+     * The SDK-side call is implemented now; the test mocks this method directly.
+     */
+    suspend fun mintSwitchAndSaveSession(
+        userId: String,
+        externalTransactionToken: String,
+    ): Result<String> {
+        val req = SwitchAndSaveSessionRequest(
+            userId = userId,
+            externalTransactionToken = externalTransactionToken,
+        )
+        val body = json.encodeToString(SwitchAndSaveSessionRequest.serializer(), req)
+        return http.post("/v1/iap/switch-and-save/session/", body)
+            .mapDecode(SwitchAndSaveSessionResponse.serializer())
+            .map { it.migrationUrl }
+    }
+
+    /**
      * `POST /v1/iap/play-store-transactions/` — syncs a Play Billing purchase to the
      * backend (creates a Transaction + entitlement, or surfaces a cross-account
      * conflict).
@@ -513,6 +540,17 @@ internal data class UcbInitiateResponse(
     // backend that predates this field (same pattern as
     // [PlaySyncResponse.transactionRef]).
     @SerialName("transaction_ref") val transactionRef: String? = null,
+)
+
+@Serializable
+internal data class SwitchAndSaveSessionRequest(
+    @SerialName("user_id") val userId: String,
+    @SerialName("external_transaction_token") val externalTransactionToken: String,
+)
+
+@Serializable
+internal data class SwitchAndSaveSessionResponse(
+    @SerialName("migration_url") val migrationUrl: String,
 )
 
 @Serializable

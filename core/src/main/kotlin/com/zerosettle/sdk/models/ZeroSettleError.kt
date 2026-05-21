@@ -93,4 +93,13 @@ public sealed class ZeroSettleError : Exception() {
     public data class JurisdictionBlocked(val country: String) : ZeroSettleError() {
         override val message: String get() = "Web checkout unavailable in jurisdiction: $country"
     }
+    /**
+     * The device or account is not eligible for the External Content Link billing
+     * program. The Switch & Save flow cannot proceed; the host app should suppress
+     * the offer or fall back to a standard migration tip.
+     */
+    public data object SwitchAndSaveUnavailable : ZeroSettleError() {
+        private fun readResolve(): Any = SwitchAndSaveUnavailable
+        override val message: String = "External Content Link billing program is not available on this device."
+    }
 }
