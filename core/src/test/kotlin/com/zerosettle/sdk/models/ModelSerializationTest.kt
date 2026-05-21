@@ -131,15 +131,28 @@ class ModelSerializationTest {
         assertThat(r.offer.proration?.amountCents).isEqualTo(199)
     }
 
-    @Test fun upgradeOfferConfig_legacyDisplay_decodes() {
+    @Test fun upgradeOfferConfig_decodes() {
+        // chunk-5 wire shape — current/target product objects + display{title,...}.
         val fixture = """
-        {"from_product_id":"pro_monthly","to_product_id":"pro_yearly","savings_percent":20,
-         "display":{"offer_title":"Go yearly","offer_message":"Save 20%","offer_cta":"Upgrade",
-           "accepted_title":"","accepted_message":"","accepted_cta":"","completed_title":"","completed_message":""}}
+        {"available":true,"savings_percent":20,"upgrade_type":"web_to_web",
+         "current_product":{"reference_id":"pro_monthly","name":"Monthly","price_cents":999,"currency":"USD","billing_label":"$9.99/mo"},
+         "target_product":{"reference_id":"pro_yearly","name":"Yearly","price_cents":7999,"currency":"USD","billing_label":"$79.99/yr","monthly_equivalent_cents":667},
+         "display":{"title":"Go yearly","body":"Save 20%","cta_text":"Upgrade","dismiss_text":"Not now"}}
         """.trimIndent()
         val cfg = json.decodeFromString(UpgradeOffer.Config.serializer(), fixture)
-        assertThat(cfg.toProductId).isEqualTo("pro_yearly")
-        assertThat(cfg.display.offerTitleOrDefault("F")).isEqualTo("Go yearly")
+        assertThat(cfg.targetProduct?.referenceId).isEqualTo("pro_yearly")
+        assertThat(cfg.currentProduct?.priceCents).isEqualTo(999)
+        assertThat(cfg.display?.title).isEqualTo("Go yearly")
+    }
+
+    @Test fun upgradeOfferConfig_notAvailable_decodes() {
+        val cfg = json.decodeFromString(
+            UpgradeOffer.Config.serializer(),
+            """{"available":false,"reason":"no_active_subscription"}""",
+        )
+        assertThat(cfg.available).isFalse()
+        assertThat(cfg.reason).isEqualTo("no_active_subscription")
+        assertThat(cfg.display).isNull()
     }
 
     @Test fun cancelFlow_config_decodes() {

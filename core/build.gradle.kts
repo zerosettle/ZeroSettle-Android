@@ -69,15 +69,10 @@ dependencies {
 
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
-    // Skip Javadoc generation. Reason: Dokka (bundled with AGP 9.0.1 via
-    //   :javaDocReleaseGeneration) uses an older ASM that doesn't support
-    // Java 17 sealed-class PermittedSubclasses, so generation crashes on
-    // sealed classes (e.g., PendingAction):
-    //   UnsupportedOperationException: PermittedSubclasses requires ASM9
-    // Re-enable (publishJavadocJar = true) when Dokka catches up to ASM 9
-    // or after migrating away from Dokka here. Maven Central does require
-    // a Javadoc JAR for release uploads, so the eventual fix is a release
-    // prerequisite — tracked alongside the Phase 5 release work.
+    // Maven Central requires a Javadoc JAR. AGP's Dokka-based javadoc task
+    // crashes deserializing Java 17 sealed classes (ASM < 9), so generation
+    // is disabled here and an empty Javadoc JAR is published instead — see
+    // the `emptyJavadocJar` block below.
     configure(
         com.vanniktech.maven.publish.AndroidSingleVariantLibrary(
             variant = "release",
@@ -128,25 +123,14 @@ mavenPublishing {
     }
 }
 
-// Release-time hard gate: Maven Central will reject uploads that lack a
-// Javadoc JAR. Until Dokka catches up to ASM 9 / Java 17 sealed classes
-// (see the mavenPublishing.configure() block above), every Central upload
-// from this module will fail at the server side. Fail FAST instead —
-// refuse the publish task locally unless an operator explicitly bypasses
-// with -Pzerosettle.bypassJavadocCheck=true (which exists so this gate
-// doesn't block testing the publish pipeline itself). Real release fix
-// is tracked alongside Phase 5 release work in the Flutter parity plan.
-afterEvaluate {
-    tasks.matching { it.name.startsWith("publish") && it.name.contains("Central") }
-        .configureEach {
-            doFirst {
-                require(project.hasProperty("zerosettle.bypassJavadocCheck")) {
-                    "Refusing to publish to Maven Central without a Javadoc JAR. " +
-                        "Dokka skip is active (see mavenPublishing.configure() in " +
-                        "core/build.gradle.kts). Central will reject the upload. " +
-                        "Either re-enable Javadoc generation (publishJavadocJar = true) " +
-                        "or pass -Pzerosettle.bypassJavadocCheck=true to override this gate."
-                }
-            }
-        }
+// Maven Central requires a `-javadoc.jar`. AGP's Dokka-based javadoc task
+// crashes deserializing Java 17 sealed classes (ASM < 9 / PermittedSubclasses),
+// so `publishJavadocJar` is disabled above; publish an EMPTY Javadoc JAR
+// instead — Central validates the artifact's presence, not its contents.
+val emptyJavadocJar = tasks.register<org.gradle.api.tasks.bundling.Jar>("emptyJavadocJar") {
+    archiveClassifier.set("javadoc")
+}
+extensions.configure<org.gradle.api.publish.PublishingExtension> {
+    publications.withType(org.gradle.api.publish.maven.MavenPublication::class.java)
+        .configureEach { artifact(emptyJavadocJar) }
 }

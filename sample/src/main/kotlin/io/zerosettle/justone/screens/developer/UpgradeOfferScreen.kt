@@ -47,8 +47,11 @@ fun UpgradeOfferScreen() {
         config?.let { cfg ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("from=${cfg.fromProductId} → to=${cfg.toProductId}  savings=${cfg.savingsPercent}%")
-                    Text("title=\"${cfg.display.offerTitle}\"  cta=\"${cfg.display.offerCta}\"")
+                    Text(
+                        "from=${cfg.currentProduct?.referenceId ?: "—"} → " +
+                            "to=${cfg.targetProduct?.referenceId ?: "—"}  savings=${cfg.savingsPercent ?: 0}%",
+                    )
+                    Text("title=\"${cfg.display?.title ?: "—"}\"  cta=\"${cfg.display?.ctaText ?: "—"}\"")
                 }
             }
             ZeroSettleUpgradeOffer(
@@ -57,7 +60,10 @@ fun UpgradeOfferScreen() {
                     scope.launch {
                         status = when (result) {
                             is UpgradeOffer.Result.Accepted -> {
-                                val r = ZeroSettle.executeUpgradeOffer(cfg.fromProductId, result.newProductId)
+                                val r = ZeroSettle.executeUpgradeOffer(
+                                    cfg.currentProduct?.referenceId.orEmpty(),
+                                    result.newProductId,
+                                )
                                 if (r.isSuccess) "upgrade executed → ${r.getOrNull()}" else "executeUpgradeOffer failed: ${r.exceptionOrNull()?.message}"
                             }
                             UpgradeOffer.Result.Dismissed -> "dismissed upgrade offer"

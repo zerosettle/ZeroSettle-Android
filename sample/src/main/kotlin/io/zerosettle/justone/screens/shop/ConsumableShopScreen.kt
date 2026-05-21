@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -24,7 +25,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -35,13 +39,14 @@ import com.zerosettle.sdk.models.Product
 import com.zerosettle.sdk.models.ProductType
 import io.zerosettle.justone.data.UserPrefs
 import io.zerosettle.justone.screens.paywall.CheckoutSheetHeader
-import io.zerosettle.justone.screens.paywall.DualPriceButtons
+import io.zerosettle.justone.screens.paywall.findActivity
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConsumableShopScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val activity = ctx.findActivity()
     val scope = rememberCoroutineScope()
     val products by ZeroSettle.products.collectAsState()
 
@@ -96,18 +101,38 @@ fun ConsumableShopScreen(onBack: () -> Unit) {
                 }
 
                 items(consumables, key = { it.id }) { product ->
+                    var purchasing by remember { mutableStateOf(false) }
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             CheckoutSheetHeader(product = product)
                             Spacer(modifier = Modifier.height(12.dp))
-                            DualPriceButtons(
-                                productId = product.id,
-                                onPurchased = {
+                            // Single "Buy" button — routed through Google's
+                            // User Choice Billing screen, which presents the
+                            // Play-vs-web choice.
+                            Button(
+                                onClick = {
                                     scope.launch {
-                                        UserPrefs(ctx).addStreakSavers(streakSaverGrant(product))
+                                        purchasing = true
+                                        try {
+                                            val result = ZeroSettle.purchaseViaPlayBilling(
+                                                activity,
+                                                product.id,
+                                            )
+                                            if (result.isSuccess) {
+                                                UserPrefs(ctx).addStreakSavers(
+                                                    streakSaverGrant(product),
+                                                )
+                                            }
+                                        } finally {
+                                            purchasing = false
+                                        }
                                     }
                                 },
-                            )
+                                enabled = !purchasing,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(if (purchasing) "Processing…" else "Buy")
+                            }
                         }
                     }
                 }

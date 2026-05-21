@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -19,17 +20,22 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.ZeroSettle
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PremiumUpsellSheet(onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState()
+    val activity = LocalContext.current.findActivity()
+    val scope = rememberCoroutineScope()
 
     val products by ZeroSettle.products.collectAsState()
     val plans = remember(products) { subscriptionPlans(products) }
@@ -40,6 +46,7 @@ fun PremiumUpsellSheet(onDismiss: () -> Unit) {
         }
     }
     val selected = plans.firstOrNull { it.id == selectedId }
+    var purchasing by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -80,11 +87,30 @@ fun PremiumUpsellSheet(onDismiss: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                DualPriceButtons(
-                    productId = selected.id,
-                    onPurchased = onDismiss,
+                // Single "Buy" button. On Android the purchase is routed
+                // through Google's User Choice Billing screen, which presents
+                // the Play-vs-web choice — the app must not hand-roll its own
+                // payment-method picker.
+                Button(
+                    onClick = {
+                        scope.launch {
+                            purchasing = true
+                            try {
+                                val result = ZeroSettle.purchaseViaPlayBilling(
+                                    activity,
+                                    selected.id,
+                                )
+                                if (result.isSuccess) onDismiss()
+                            } finally {
+                                purchasing = false
+                            }
+                        }
+                    },
+                    enabled = !purchasing,
                     modifier = Modifier.fillMaxWidth(),
-                )
+                ) {
+                    Text(if (purchasing) "Processing…" else "Buy")
+                }
             } else {
                 Box(
                     modifier = Modifier

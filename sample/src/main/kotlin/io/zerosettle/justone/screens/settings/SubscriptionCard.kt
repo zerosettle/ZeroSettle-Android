@@ -70,7 +70,11 @@ fun SubscriptionCard(
                 var upgradeAvailable by remember { mutableStateOf(false) }
 
                 LaunchedEffect(sub.productId) {
-                    upgradeAvailable = ZeroSettle.fetchUpgradeOfferConfig(sub.productId).isSuccess
+                    // Gate on the decoded `available` flag — `.isSuccess` is true
+                    // even for an `{"available": false}` response (a clean decode
+                    // is not the same as an offer being available).
+                    upgradeAvailable =
+                        ZeroSettle.fetchUpgradeOfferConfig(sub.productId).getOrNull()?.available == true
                 }
 
                 // Plan name

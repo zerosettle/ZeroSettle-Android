@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +16,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,6 +55,7 @@ fun EnvSwitcherScreen(onIdentified: () -> Unit) {
     var customUrl by remember { mutableStateOf(SampleConfig.loadCustomUrl(ctx)) }
     var envMenuOpen by remember { mutableStateOf(false) }
     var effectiveUrl by remember { mutableStateOf(SampleConfig.effectiveBaseUrl(ctx)) }
+    var eclOverride by remember { mutableStateOf(SampleConfig.loadEclOverride(ctx)) }
 
     val configured by ZeroSettle.isConfigured.collectAsState()
     val bootstrapped by ZeroSettle.isBootstrapped.collectAsState()
@@ -142,6 +146,33 @@ fun EnvSwitcherScreen(onIdentified: () -> Unit) {
             ) { Text("Use custom URL") }
         }
         Text("→ $effectiveUrl", overflow = TextOverflow.Ellipsis, maxLines = 2)
+
+        HorizontalDivider()
+        Text("Switch & Save testing")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text("Force ECL available")
+                Text(
+                    "Bypasses the Play ECL check so the Switch & Save offer tip surfaces on " +
+                        "devices/accounts not enrolled in Google's ECL program. Testing only — " +
+                        "leave off for production behavior.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = eclOverride,
+                onCheckedChange = { checked ->
+                    eclOverride = checked
+                    SampleConfig.saveEclOverride(ctx, checked)
+                    ZeroSettle.eclAvailabilityOverride = if (checked) true else null
+                },
+            )
+        }
 
         HorizontalDivider()
         OutlinedTextField(userId, { userId = it }, label = { Text("User ID") }, modifier = Modifier.fillMaxWidth())

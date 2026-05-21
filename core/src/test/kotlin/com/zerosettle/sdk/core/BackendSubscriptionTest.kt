@@ -56,15 +56,37 @@ class BackendSubscriptionTest {
     }
 
     @Test fun fetchUpgradeOfferConfig_decodes() = runTest {
+        // The real `GET /v1/iap/upgrade-offer/` (chunk-5) wire shape.
         server.enqueue(
             MockResponse().setBody(
-                """{"from_product_id":"pro_monthly","to_product_id":"pro_yearly","savings_percent":20,
-                   "display":{"offer_title":"","offer_message":"","offer_cta":"","accepted_title":"","accepted_message":"","accepted_cta":"","completed_title":"","completed_message":""}}""",
+                """{"available":true,"savings_percent":33,"upgrade_type":"web_to_web",
+                   "current_product":{"reference_id":"pro_monthly","name":"Monthly","price_cents":999,"currency":"USD","billing_label":"$9.99/mo"},
+                   "target_product":{"reference_id":"pro_yearly","name":"Yearly","price_cents":7999,"currency":"USD","billing_label":"$79.99/yr","monthly_equivalent_cents":667},
+                   "proration":{"amount_cents":-250,"currency":"USD","next_billing_date":"2026-06-20T00:00:00Z"},
+                   "display":{"title":"Save 33%","body":"Switch to annual.","cta_text":"Upgrade","dismiss_text":"Not now"},
+                   "variant_id":7}""",
             ),
         )
         val res = backend.fetchUpgradeOfferConfig(userId = "u1", productId = "pro_monthly")
-        assertThat(res.getOrNull()?.toProductId).isEqualTo("pro_yearly")
+        val cfg = res.getOrNull()
+        assertThat(cfg?.available).isTrue()
+        assertThat(cfg?.targetProduct?.referenceId).isEqualTo("pro_yearly")
+        assertThat(cfg?.targetProduct?.monthlyEquivalentCents).isEqualTo(667)
+        assertThat(cfg?.proration?.amountCents).isEqualTo(-250)
+        assertThat(cfg?.display?.title).isEqualTo("Save 33%")
         assertThat(server.takeRequest().path).contains("/v1/iap/upgrade-offer/")
+    }
+
+    @Test fun fetchUpgradeOfferConfig_notAvailable_decodes() = runTest {
+        // A not-available response has no product/proration/display blocks.
+        server.enqueue(
+            MockResponse().setBody("""{"available":false,"reason":"already_highest_tier"}"""),
+        )
+        val res = backend.fetchUpgradeOfferConfig(userId = "u1", productId = null)
+        val cfg = res.getOrNull()
+        assertThat(cfg?.available).isFalse()
+        assertThat(cfg?.reason).isEqualTo("already_highest_tier")
+        assertThat(cfg?.targetProduct).isNull()
     }
 
     @Test fun executeUpgradeOffer_posts() = runTest {

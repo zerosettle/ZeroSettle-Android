@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +36,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun LaunchPaywallScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
+    val activity = ctx.findActivity()
     val scope = rememberCoroutineScope()
 
     val products by ZeroSettle.products.collectAsState()
@@ -46,6 +48,7 @@ fun LaunchPaywallScreen(onDone: () -> Unit) {
         }
     }
     val selected = plans.firstOrNull { it.id == selectedId }
+    var purchasing by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -97,11 +100,30 @@ fun LaunchPaywallScreen(onDone: () -> Unit) {
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                DualPriceButtons(
-                    productId = selected.id,
-                    onPurchased = onDone,
+                // Single "Buy" button. On Android the purchase is routed
+                // through Google's User Choice Billing screen, which presents
+                // the Play-vs-web choice — the app must not hand-roll its own
+                // payment-method picker.
+                Button(
+                    onClick = {
+                        scope.launch {
+                            purchasing = true
+                            try {
+                                val result = ZeroSettle.purchaseViaPlayBilling(
+                                    activity,
+                                    selected.id,
+                                )
+                                if (result.isSuccess) onDone()
+                            } finally {
+                                purchasing = false
+                            }
+                        }
+                    },
+                    enabled = !purchasing,
                     modifier = Modifier.fillMaxWidth(),
-                )
+                ) {
+                    Text(if (purchasing) "Processing…" else "Buy")
+                }
             } else {
                 Box(
                     modifier = Modifier

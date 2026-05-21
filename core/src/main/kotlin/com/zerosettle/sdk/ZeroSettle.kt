@@ -56,6 +56,22 @@ public object ZeroSettle {
         private set
     @Volatile internal var backend: Backend? = null
         private set
+
+    /**
+     * Testing override for the Switch & Save (Play→web) offer's ECL gate.
+     *
+     * `MIGRATE_PLAY_TO_WEB` offers are only surfaced when Google's External
+     * Content Link program reports available on the device — [com.zerosettle.sdk.offers.OfferManager]
+     * suppresses them otherwise. ECL is limited-availability, so on dev/QA
+     * devices not enrolled in the program the Switch & Save tip never appears.
+     *
+     * Set `true` to force the ECL availability check to pass (or `false` to
+     * force-fail it) so developers can exercise the Switch & Save UI without
+     * an ECL-enrolled device/account. Leave `null` in production — when
+     * `null`, the real Play Billing query runs.
+     */
+    @Volatile public var eclAvailabilityOverride: Boolean? = null
+
     @Volatile internal var identityStore: IdentityStore? = null
         private set
     @Volatile internal var playCoordinator: com.zerosettle.sdk.billing.PlayBillingCoordinator? = null
@@ -1043,6 +1059,7 @@ public object ZeroSettle {
         val be = backend ?: throw ZeroSettleError.NotConfigured
         val dismissals = offerDismissalStore ?: throw ZeroSettleError.NotConfigured
         val ctx = appContext ?: throw ZeroSettleError.NotConfigured
+        val logger = config?.logger
         return com.zerosettle.sdk.offers.OfferManager(
             fetchUserOffer = { be.fetchUserOffer(uid) },
             isDismissed = { dismissals.isDismissed(uid) },
@@ -1077,14 +1094,27 @@ public object ZeroSettle {
             },
             executeUpgradeOffer = { from, to -> be.executeUpgradeOffer(uid, from, to).map { } },
             isEclAvailable = {
-                val eclClient = ExternalContentLinkClient(ctx)
-                try {
-                    eclClient.isAvailable()
-                } finally {
-                    eclClient.endConnection()
+                val forced = eclAvailabilityOverride
+                if (forced != null) {
+                    logger?.warn(
+                        "OfferManager",
+                        "ECL availability OVERRIDDEN to $forced via ZeroSettle.eclAvailabilityOverride " +
+                            "(testing only — must be null in production builds)",
+                    )
+                    forced
+                } else {
+                    val eclClient = ExternalContentLinkClient(ctx)
+                    val available = try {
+                        eclClient.isAvailable()
+                    } finally {
+                        eclClient.endConnection()
+                    }
+                    logger?.info("OfferManager", "ECL availability (Play Billing query): available=$available")
+                    available
                 }
             },
             launchSwitchAndSave = { activity -> launchSwitchAndSave(activity) },
+            logger = logger,
         )
     }
 

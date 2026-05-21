@@ -188,10 +188,17 @@ internal class PlayBillingCoordinator(
     suspend fun purchaseViaPlayBilling(activity: Activity, product: Product): Result<Unit> {
         val playProductId = product.playProductId ?: product.id
         val billingProductType = playBillingProductType(product)
+        logger.info(
+            "billing",
+            "purchaseViaPlayBilling: product.id=${product.id} type=${product.type} → " +
+                "querying playProductId=$playProductId asType=$billingProductType " +
+                "playBasePlanId=${product.playBasePlanId} " +
+                "(play_product_id ${if (product.playProductId != null) "from catalog" else "MISSING in catalog — fell back to product.id"})",
+        )
         val detailsResult = billing.queryProductDetails(listOf(playProductId), billingProductType)
         val details = detailsResult.getOrElse { return Result.failure(it) }
         val match = details.firstOrNull() ?: return Result.failure(ZeroSettleError.ProductNotFound(playProductId))
-        return billing.launchBillingFlow(activity, match)
+        return billing.launchBillingFlow(activity, match, basePlanId = product.playBasePlanId)
     }
 
     private suspend fun handlePurchases(purchases: List<Purchase>) {

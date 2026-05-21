@@ -65,10 +65,9 @@ dependencies {
 
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
-    // Skip Javadoc generation. Same Dokka/ASM 9 incompatibility as :core
-    // (see core/build.gradle.kts for details). :ui doesn't have its own
-    // sealed classes but Dokka still scans transitively. Re-enable when
-    // Dokka supports ASM 9. Tracked with the Phase 5 release work.
+    // Maven Central requires a Javadoc JAR. AGP's Dokka-based javadoc task
+    // crashes on Java 17 sealed classes (ASM < 9), so generation is disabled
+    // and an empty Javadoc JAR is published instead — see `emptyJavadocJar`.
     configure(
         com.vanniktech.maven.publish.AndroidSingleVariantLibrary(
             variant = "release",
@@ -114,20 +113,14 @@ mavenPublishing {
     }
 }
 
-// Release-time hard gate, parallel to :core. See core/build.gradle.kts
-// afterEvaluate block for the rationale; same dokka-skip → Central-reject
-// risk applies to this module's Javadoc-less publishes.
-afterEvaluate {
-    tasks.matching { it.name.startsWith("publish") && it.name.contains("Central") }
-        .configureEach {
-            doFirst {
-                require(project.hasProperty("zerosettle.bypassJavadocCheck")) {
-                    "Refusing to publish :ui to Maven Central without a Javadoc JAR. " +
-                        "Dokka skip is active (see mavenPublishing.configure() above). " +
-                        "Central will reject the upload. Either re-enable Javadoc " +
-                        "generation (publishJavadocJar = true) or pass " +
-                        "-Pzerosettle.bypassJavadocCheck=true to override this gate."
-                }
-            }
-        }
+// Maven Central requires a `-javadoc.jar`. AGP's Dokka-based javadoc task
+// crashes deserializing Java 17 sealed classes (ASM < 9 / PermittedSubclasses),
+// so `publishJavadocJar` is disabled above; publish an EMPTY Javadoc JAR
+// instead — Central validates the artifact's presence, not its contents.
+val emptyJavadocJar = tasks.register<org.gradle.api.tasks.bundling.Jar>("emptyJavadocJar") {
+    archiveClassifier.set("javadoc")
+}
+extensions.configure<org.gradle.api.publish.PublishingExtension> {
+    publications.withType(org.gradle.api.publish.maven.MavenPublication::class.java)
+        .configureEach { artifact(emptyJavadocJar) }
 }

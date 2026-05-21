@@ -27,13 +27,28 @@ public fun ZeroSettleUpgradeOffer(
     onResult: (UpgradeOffer.Result) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val display = config.display
     Column(modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(config.display.offerTitleOrDefault("Save ${config.savingsPercent}%"), style = MaterialTheme.typography.titleMedium)
-        Text(config.display.offerMessageOrDefault("Switch to a better plan."), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            (display?.title ?: "").ifBlank { "Save ${config.savingsPercent ?: 0}%" },
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            (display?.body ?: "").ifBlank { "Switch to a better plan." },
+            style = MaterialTheme.typography.bodyMedium,
+        )
         Button(
-            onClick = { onResult(UpgradeOffer.Result.Accepted(newProductId = config.toProductId)) },
+            onClick = {
+                onResult(
+                    UpgradeOffer.Result.Accepted(
+                        newProductId = config.targetProduct?.referenceId.orEmpty(),
+                    ),
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(config.display.offerCtaOrDefault("Upgrade")) }
-        TextButton(onClick = { onResult(UpgradeOffer.Result.Dismissed) }, modifier = Modifier.fillMaxWidth()) { Text("Not now") }
+        ) { Text((display?.ctaText ?: "").ifBlank { "Upgrade" }) }
+        TextButton(onClick = { onResult(UpgradeOffer.Result.Dismissed) }, modifier = Modifier.fillMaxWidth()) {
+            Text((display?.dismissText ?: "").ifBlank { "Not now" })
+        }
     }
 }

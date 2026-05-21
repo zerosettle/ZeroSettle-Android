@@ -168,6 +168,11 @@ public class PlayBillingManager(
         if (client.isReady) { cont.resume(Result.success(Unit)); return@suspendCancellableCoroutine }
         client.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(result: BillingResult) {
+                // BillingClient can invoke this more than once on the same listener
+                // (the billing service reconnects → the listener fires again).
+                // Resuming the continuation twice is a fatal IllegalStateException
+                // ("Already resumed"), so resume at most once.
+                if (!cont.isActive) return
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) cont.resume(Result.success(Unit))
                 else cont.resume(Result.failure(mapBillingError(result.responseCode, result.debugMessage)))
             }
@@ -186,24 +191,66 @@ public class PlayBillingManager(
             },
         ).build()
         val res = client.queryProductDetails(params)
-        return if (res.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-            Result.success(res.productDetailsList ?: emptyList())
+        val rc = res.billingResult.responseCode
+        logger.info(
+            "billing",
+            "queryProductDetails: ids=$productIds type=$productType → responseCode=$rc " +
+                "debugMessage=\"${res.billingResult.debugMessage}\" " +
+                "productDetailsList.size=${res.productDetailsList?.size ?: 0}",
+        )
+        return if (rc == BillingClient.BillingResponseCode.OK) {
+            val list = res.productDetailsList ?: emptyList()
+            if (list.isEmpty()) {
+                logger.warn(
+                    "billing",
+                    "queryProductDetails OK but returned 0 products for $productIds ($productType) — " +
+                        "Play has no such product/subscription on this build/track/account. " +
+                        "Verify the id is an ACTIVE Play Console product matching the catalog's play_product_id.",
+                )
+            }
+            Result.success(list)
         } else {
-            Result.failure(mapBillingError(res.billingResult.responseCode, res.billingResult.debugMessage))
+            logger.error("billing", "queryProductDetails FAILED rc=$rc: ${res.billingResult.debugMessage}")
+            Result.failure(mapBillingError(rc, res.billingResult.debugMessage))
         }
     }
 
-    /** Launch the purchase flow for [details] (using its first base-plan offer if a subscription). */
-    public suspend fun launchBillingFlow(activity: Activity, details: ProductDetails): Result<Unit> {
+    /**
+     * Launch the purchase flow for [details]. For a subscription, selects the
+     * offer whose base plan matches [basePlanId] (the catalog's `play_base_plan_id`),
+     * falling back to the first offer when [basePlanId] is null or unmatched.
+     *
+     * Play Billing requires an `offerToken` for subscription purchases, and it
+     * must target the intended base plan — picking an arbitrary offer can launch
+     * the wrong plan, or an offer the user is ineligible for.
+     */
+    public suspend fun launchBillingFlow(
+        activity: Activity,
+        details: ProductDetails,
+        basePlanId: String? = null,
+    ): Result<Unit> {
         ensureConnected().getOrElse { return Result.failure(it) }
         val productParamsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(details)
-        details.subscriptionOfferDetails?.firstOrNull()?.let {
-            productParamsBuilder.setOfferToken(it.offerToken)
+        details.subscriptionOfferDetails?.let { offers ->
+            val offer = basePlanId?.let { bp -> offers.firstOrNull { it.basePlanId == bp } }
+                ?: offers.firstOrNull()
+            offer?.let { productParamsBuilder.setOfferToken(it.offerToken) }
+            logger.info(
+                "billing",
+                "launchBillingFlow: productId=${details.productId} subscription offers=" +
+                    "${offers.map { it.basePlanId }} wantBasePlanId=$basePlanId " +
+                    "selectedBasePlanId=${offer?.basePlanId}",
+            )
         }
         val flowParamsBuilder = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(listOf(productParamsBuilder.build()))
         obfuscatedAccountIdProvider()?.let { flowParamsBuilder.setObfuscatedAccountId(it) }
         val result = client.launchBillingFlow(activity, flowParamsBuilder.build())
+        logger.info(
+            "billing",
+            "launchBillingFlow result: productId=${details.productId} " +
+                "responseCode=${result.responseCode} debugMessage=\"${result.debugMessage}\"",
+        )
         return if (result.responseCode == BillingClient.BillingResponseCode.OK) Result.success(Unit)
         else Result.failure(mapBillingError(result.responseCode, result.debugMessage))
     }

@@ -109,7 +109,10 @@ public class OfferManager internal constructor(
         _state.value = OfferState.LOADING
         _checkoutError.value = null
         try {
-            if (isDismissed()) { _state.value = OfferState.INELIGIBLE; return }
+            if (isDismissed()) {
+                logger?.info("OfferManager", "evaluate → INELIGIBLE: offer was dismissed locally by this user")
+                _state.value = OfferState.INELIGIBLE; return
+            }
             val resp = fetchUserOffer().getOrElse { err ->
                 val zsErr = err as? ZeroSettleError ?: ZeroSettleError.NetworkError(err)
                 logger?.error("OfferManager", "user-offer fetch/decode failed: ${zsErr.message}", err)
@@ -119,15 +122,29 @@ public class OfferManager internal constructor(
                 return
             }
             val offer = resp.eligibleOffer
-            if (offer == null) { _state.value = OfferState.INELIGIBLE; return }
+            if (offer == null) {
+                logger?.info(
+                    "OfferManager",
+                    "evaluate → INELIGIBLE: backend returned no eligible offer " +
+                        "(is_eligible=false or action_type=no_action)",
+                )
+                _state.value = OfferState.INELIGIBLE; return
+            }
             // MIGRATE_PLAY_TO_WEB requires the ECL billing program to be available on this
             // device. If unavailable, suppress the offer (INELIGIBLE) so non-enrolled users
             // never see a dead CTA.
             if (offer.actionType == UserOffer.ActionType.MIGRATE_PLAY_TO_WEB && !isEclAvailable()) {
+                logger?.warn(
+                    "OfferManager",
+                    "evaluate → INELIGIBLE: MIGRATE_PLAY_TO_WEB (Switch & Save) offer for " +
+                        "${offer.checkoutProductId} suppressed — ECL unavailable on this device/account. " +
+                        "Set ZeroSettle.eclAvailabilityOverride = true to test without an ECL-enrolled device.",
+                )
                 _state.value = OfferState.INELIGIBLE; return
             }
             _offerData.value = offer
             _state.value = OfferState.PRESENTED
+            logger?.info("OfferManager", "evaluate → PRESENTED: ${offer.actionType} offer for ${offer.checkoutProductId}")
             onEvent(OfferEvent.Shown(offer.checkoutProductId))
         } finally {
             _isLoading.value = false

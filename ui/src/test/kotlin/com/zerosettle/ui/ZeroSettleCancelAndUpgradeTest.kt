@@ -53,8 +53,9 @@ class ZeroSettleCancelAndUpgradeTest {
 
     @Test fun upgradeOffer_acceptCallsResultAccepted() {
         val cfg = UpgradeOffer.Config(
-            fromProductId = "pro_monthly", toProductId = "pro_yearly", savingsPercent = 20,
-            display = UpgradeOffer.Display("Go yearly", "Save 20% with annual billing", "Upgrade", "Done", "", "", "", ""),
+            available = true, savingsPercent = 20,
+            targetProduct = UpgradeOffer.ProductInfo("pro_yearly", "Yearly", 7999, "USD", "$79.99/yr"),
+            display = UpgradeOffer.Display("Go yearly", "Save 20% with annual billing", "Upgrade", "Done"),
         )
         var result: UpgradeOffer.Result? = null
         composeRule.setContent { MaterialTheme { ZeroSettleTheme { ZeroSettleUpgradeOffer(config = cfg, onResult = { result = it }) } } }
@@ -67,8 +68,9 @@ class ZeroSettleCancelAndUpgradeTest {
 
     @Test fun upgradeOffer_notNowCallsDismissed() {
         val cfg = UpgradeOffer.Config(
-            fromProductId = "a", toProductId = "b", savingsPercent = 10,
-            display = UpgradeOffer.Display("T", "M", "Upgrade", "", "", "", "", ""),
+            available = true, savingsPercent = 10,
+            targetProduct = UpgradeOffer.ProductInfo("b", "B", 100, "USD", "label"),
+            display = UpgradeOffer.Display("T", "M", "Upgrade", "Not now"),
         )
         var result: UpgradeOffer.Result? = null
         composeRule.setContent { MaterialTheme { ZeroSettleTheme { ZeroSettleUpgradeOffer(config = cfg, onResult = { result = it }) } } }

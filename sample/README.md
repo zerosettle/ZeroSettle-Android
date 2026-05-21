@@ -64,7 +64,7 @@ The habit-domain unit tests (`HabitCalcTest`) run without a device:
 | **Home** | Greeting, aggregated heatmap across all habits, per-habit heatmaps, habit list with check-off buttons. |
 | **Habit detail** | Per-habit calendar, current streak, completion history. |
 | **Add habit** | Form to create a new habit with emoji + color picker. |
-| **Launch paywall** | Premium gate — product cards with a UCB-aware `DualPriceButtons` widget: a single "Buy" button when `ZeroSettle.isUcbEnabled` is `true` (Google's choice screen routes web-vs-Play via `purchaseViaPlayBilling()`), or separate "Buy — Web" / "Buy — Google Play" buttons when UCB is disabled; embeds `ZeroSettleOfferTip` + `ZeroSettleCheckoutHost`. |
+| **Launch paywall** | Premium gate — product cards with a single "Buy" button calling `purchaseViaPlayBilling()`; Google's User Choice Billing screen routes web-vs-Play, so the app never hand-rolls its own payment-method picker. Embeds `ZeroSettleOfferTip` + `ZeroSettleCheckoutHost`. |
 | **Premium upsell sheet** | Bottom-sheet upsell with upgrade-offer integration. |
 | **Settings** | Account, Subscription (cancel/pause/resume), StreakSaver, Reminder, and Offer cards. |
 | **Cancel flow** | `fetchCancelFlowConfig()` → `ZeroSettleCancelFlow`; result routes to `acceptSaveOffer` / `pauseSubscription` / `cancelSubscription`, with confetti on save. |

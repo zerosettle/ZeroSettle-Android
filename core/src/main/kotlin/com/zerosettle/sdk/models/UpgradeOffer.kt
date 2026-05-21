@@ -4,53 +4,77 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * In-app subscription upgrade / downgrade offer (web → web). Distinct from the
- * unified [UserOffer] surface (the server-decided migration+upgrade offer) — this
- * is the narrower "switch plans within the same group" config the host can present
- * directly via `ZeroSettle.fetchUpgradeOfferConfig()`.
+ * In-app subscription upgrade offer — the `GET /v1/iap/upgrade-offer/`
+ * response (`compute_upgrade_offer`). Presented directly via
+ * `ZeroSettle.fetchUpgradeOfferConfig()`.
  *
- * TODO(chunk-5): align [Config] with the real `GET /v1/iap/upgrade-offer/` wire
- * shape (`{available, current_product, target_product, savings_percent, upgrade_type,
- * proration, display}` — see `compute_upgrade_offer`). The fields below were the
- * chunk-4 placeholder shape and don't decode today's response.
+ * Distinct from the unified [UserOffer] surface: [UserOffer] carries product
+ * references as bare ids, whereas [Config] carries full [ProductInfo] objects
+ * (name, price, billing label) for direct presentation.
  *
- * **WIRE-SHAPE DIVERGENCE (audit task #105):** calling
- * [com.zerosettle.sdk.ZeroSettle.fetchUpgradeOfferConfig] today crashes decode
- * with `MissingFieldException` — `from_product_id` / `to_product_id` are
- * required, but the backend emits `current_product` / `target_product` as
- * nested objects. Use the unified [UserOffer] (`fetchUserOffer()`) instead,
- * which DOES match the live wire and covers both upgrade and migration flows.
+ * Mirrors iOS `ZeroSettleKit`'s `UpgradeOffer` chunk-5 wire shape — every
+ * field except [Config.available] is optional so a not-available response
+ * (`{"available": false, "reason": ...}`) decodes cleanly.
  */
 public object UpgradeOffer {
 
+    /** Configuration returned by the backend describing an available upgrade. */
     @Serializable
     public data class Config(
-        @SerialName("from_product_id") val fromProductId: String,
-        @SerialName("to_product_id") val toProductId: String,
-        @SerialName("savings_percent") val savingsPercent: Int,
-        val display: Display,
+        /** Whether an upgrade offer is available for this user/product. */
+        val available: Boolean,
+        /** Reason the offer is unavailable (e.g. `already_highest_tier`); null when available. */
+        val reason: String? = null,
+        /** The user's current subscription product. */
+        @SerialName("current_product") val currentProduct: ProductInfo? = null,
+        /** The upgrade target product. */
+        @SerialName("target_product") val targetProduct: ProductInfo? = null,
+        /** Savings percentage (0–100). */
+        @SerialName("savings_percent") val savingsPercent: Int? = null,
+        /** The upgrade path: `web_to_web` or `storekit_to_web`. */
+        @SerialName("upgrade_type") val upgradeType: String? = null,
+        /** Proration details for web-to-web upgrades. */
+        val proration: Proration? = null,
+        /** Display messaging customized from the dashboard. */
+        val display: Display? = null,
+        /** A/B experiment variant identifier, if this config is part of an experiment. */
+        @SerialName("variant_id") val variantId: Int? = null,
     )
 
-    /**
-     * Presentation copy for the legacy upgrade-offer config (the `display` block of
-     * `GET /v1/iap/upgrade-offer/`'s response). Keys are `offer_*` / `accepted_*` /
-     * `completed_*` — the legacy shape, distinct from [UserOffer.OfferDisplay].
-     */
+    /** Info about a subscription product in an upgrade offer (current or target). */
+    @Serializable
+    public data class ProductInfo(
+        @SerialName("reference_id") val referenceId: String,
+        val name: String,
+        @SerialName("price_cents") val priceCents: Int,
+        val currency: String,
+        @SerialName("billing_label") val billingLabel: String,
+        /** Monthly-equivalent price for annual/multi-month plans; null for the current product. */
+        @SerialName("monthly_equivalent_cents") val monthlyEquivalentCents: Int? = null,
+    )
+
+    /** Proration details for web-to-web upgrades. */
+    @Serializable
+    public data class Proration(
+        /** Credit or charge amount in cents (negative = credit). */
+        @SerialName("amount_cents") val amountCents: Int,
+        val currency: String,
+        /** Next billing date after the upgrade, ISO-8601. */
+        @SerialName("next_billing_date") val nextBillingDate: String? = null,
+    )
+
+    /** Messaging to display in the upgrade offer sheet. */
     @Serializable
     public data class Display(
-        @SerialName("offer_title") val offerTitle: String,
-        @SerialName("offer_message") val offerMessage: String,
-        @SerialName("offer_cta") val offerCta: String,
-        @SerialName("accepted_title") val acceptedTitle: String,
-        @SerialName("accepted_message") val acceptedMessage: String,
-        @SerialName("accepted_cta") val acceptedCta: String,
-        @SerialName("completed_title") val completedTitle: String,
-        @SerialName("completed_message") val completedMessage: String,
-    ) {
-        public fun offerTitleOrDefault(fallback: String): String = offerTitle.ifBlank { fallback }
-        public fun offerMessageOrDefault(fallback: String): String = offerMessage.ifBlank { fallback }
-        public fun offerCtaOrDefault(fallback: String): String = offerCta.ifBlank { fallback }
-    }
+        val title: String,
+        val body: String,
+        @SerialName("cta_text") val ctaText: String,
+        @SerialName("dismiss_text") val dismissText: String,
+        /** Additional body text for StoreKit→web migrations. */
+        @SerialName("storekit_migration_body") val storekitMigrationBody: String? = null,
+        /** Instructions for cancelling the Apple subscription. */
+        @SerialName("storekit_cancel_instructions") val storekitCancelInstructions: String? = null,
+    )
 
     public sealed class Result {
         public data class Accepted(val newProductId: String) : Result()
