@@ -1,5 +1,6 @@
 package com.zerosettle.sdk.offers
 
+import android.app.Activity
 import com.google.common.truth.Truth.assertThat
 import com.zerosettle.sdk.models.UserOffer
 import com.zerosettle.sdk.models.ZeroSettleError
@@ -73,6 +74,8 @@ class OfferManagerTest {
         autoRenewOff: () -> Boolean = { false },
         executeUpgrade: suspend (from: String, to: String) -> Result<Unit> = { _, _ -> Result.success(Unit) },
         onEvent: (OfferManager.OfferEvent) -> Unit = {},
+        isEclAvailable: suspend () -> Boolean = { true },
+        launchSwitchAndSave: suspend (Activity) -> Result<Unit> = { Result.success(Unit) },
     ) = OfferManager(
         fetchUserOffer = { offerResult },
         isDismissed = { dismissed },
@@ -84,6 +87,8 @@ class OfferManagerTest {
         launchCheckout = { _ -> },
         onEvent = onEvent,
         executeUpgradeOffer = executeUpgrade,
+        isEclAvailable = isEclAvailable,
+        launchSwitchAndSave = launchSwitchAndSave,
     )
 
     @Test fun evaluate_eligible_movesToPresented() = runTest {
@@ -200,4 +205,124 @@ class OfferManagerTest {
         assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.DISMISSED)
         assertThat(persisted).isTrue()
     }
+
+    // ─── MIGRATE_PLAY_TO_WEB tests ────────────────────────────────────────────
+
+    private fun playToWebOffer() = UserOffer.OfferData(
+        actionType = UserOffer.ActionType.MIGRATE_PLAY_TO_WEB,
+        isEligible = true,
+        checkoutProductId = "pro_monthly_web",
+        fromProductId = "pro_monthly",
+        savingsPercent = 15,
+        rolloutPercent = 100,
+        display = migrationDisplay(),
+        source = UserOffer.SourceStorefront.PLAY_STORE,
+    )
+
+    /** Decode `"migrate_play_to_web"` wire string to [UserOffer.ActionType.MIGRATE_PLAY_TO_WEB]. */
+    @Test fun migratePlayToWeb_actionType_decodesFromWireString() {
+        val decoded = kotlinx.serialization.json.Json.decodeFromString(
+            UserOffer.ActionType.serializer(),
+            "\"migrate_play_to_web\"",
+        )
+        assertThat(decoded).isEqualTo(UserOffer.ActionType.MIGRATE_PLAY_TO_WEB)
+    }
+
+    /** Round-trip: [UserOffer.ActionType.MIGRATE_PLAY_TO_WEB] encodes to exact wire string. */
+    @Test fun migratePlayToWeb_actionType_encodesToWireString() {
+        val encoded = kotlinx.serialization.json.Json.encodeToString(
+            UserOffer.ActionType.serializer(),
+            UserOffer.ActionType.MIGRATE_PLAY_TO_WEB,
+        )
+        assertThat(encoded).isEqualTo("\"migrate_play_to_web\"")
+    }
+
+    // acceptOffer(activity) tests for MIGRATE_PLAY_TO_WEB live in
+    // OfferManagerPlayToWebTest (Robolectric — needs a real Activity instance).
+
+    /**
+     * The no-arg [OfferManager.acceptOffer] must REJECT a MIGRATE_PLAY_TO_WEB offer —
+     * a Play→web migration must never fall back to the in-app WebView checkout (a
+     * Google Play policy violation). It returns [ZeroSettleError.SwitchAndSaveRequiresActivity]
+     * and does NOT call createWebCheckout or publish a pending checkout URL.
+     */
+    @Test fun migratePlayToWeb_noArgAcceptOffer_rejected_doesNotCallWebCheckout() = runTest {
+        var webCheckoutCalled = false
+        val m = makeManager(
+            offerResult = Result.success(response(playToWebOffer(), subType = "active_storekit")),
+            isEclAvailable = { true },
+            createCheckout = { _, _ -> webCheckoutCalled = true; Result.success("https://c/x") },
+        )
+        m.evaluate()
+        assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.PRESENTED)
+
+        val res = m.acceptOffer()
+        assertThat(res.isFailure).isTrue()
+        assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.SwitchAndSaveRequiresActivity::class.java)
+        assertThat(webCheckoutCalled).isFalse()
+        assertThat(m.pendingCheckoutUrl.first()).isNull()
+    }
+
+    /**
+     * [OfferManager.checkoutUrl] (the raw-URL escape hatch) must also REJECT a
+     * MIGRATE_PLAY_TO_WEB offer — it must never mint a Stripe checkout URL for a
+     * Play→web migration.
+     */
+    @Test fun migratePlayToWeb_checkoutUrl_rejected_doesNotCallWebCheckout() = runTest {
+        var webCheckoutCalled = false
+        val m = makeManager(
+            offerResult = Result.success(response(playToWebOffer(), subType = "active_storekit")),
+            isEclAvailable = { true },
+            createCheckout = { _, _ -> webCheckoutCalled = true; Result.success("https://c/x") },
+        )
+        m.evaluate()
+
+        val res = m.checkoutUrl()
+        assertThat(res.isFailure).isTrue()
+        assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.SwitchAndSaveRequiresActivity::class.java)
+        assertThat(webCheckoutCalled).isFalse()
+    }
+
+    /**
+     * ECL NOT available + MIGRATE_PLAY_TO_WEB offer → evaluate moves to INELIGIBLE
+     * (the offer is suppressed; Shown event is NOT emitted).
+     */
+    @Test fun migratePlayToWeb_eclUnavailable_evaluateMovesToIneligible() = runTest {
+        val events = mutableListOf<OfferManager.OfferEvent>()
+        val m = makeManager(
+            offerResult = Result.success(response(playToWebOffer(), subType = "active_storekit")),
+            isEclAvailable = { false },
+            onEvent = { events += it },
+        )
+        m.evaluate()
+        assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.INELIGIBLE)
+        assertThat(events.filterIsInstance<OfferManager.OfferEvent.Shown>()).isEmpty()
+    }
+
+    /**
+     * ECL available + MIGRATE_PLAY_TO_WEB offer → evaluate moves to PRESENTED.
+     */
+    @Test fun migratePlayToWeb_eclAvailable_evaluateMovesToPresented() = runTest {
+        val m = makeManager(
+            offerResult = Result.success(response(playToWebOffer(), subType = "active_storekit")),
+            isEclAvailable = { true },
+        )
+        m.evaluate()
+        assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.PRESENTED)
+    }
+
+    /**
+     * ECL is unavailable but the offer is a MIGRATE_STOREKIT_TO_WEB (not Play→web):
+     * the offer must still surface (PRESENTED). The ECL gate is action-type-specific.
+     */
+    @Test fun storeKitMigration_eclUnavailable_stillPresented() = runTest {
+        val m = makeManager(
+            offerResult = Result.success(response(migrationOffer())),
+            isEclAvailable = { false },
+        )
+        m.evaluate()
+        assertThat(m.state.first()).isEqualTo(OfferManager.OfferState.PRESENTED)
+    }
+
+    // acceptOffer(activity) failure test lives in OfferManagerPlayToWebTest (Robolectric).
 }

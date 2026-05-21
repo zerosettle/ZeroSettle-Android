@@ -111,6 +111,13 @@ public object UserOffer {
         @SerialName("migrate_storekit_to_web") MIGRATE_STOREKIT_TO_WEB,
         @SerialName("upgrade_storekit_to_web") UPGRADE_STOREKIT_TO_WEB,
         @SerialName("upgrade_web_to_web") UPGRADE_WEB_TO_WEB,
+        /**
+         * Play Store → web checkout migration via Google's External Content Link (ECL)
+         * billing program. The SDK routes `acceptOffer(activity)` to
+         * `ZeroSettle.launchSwitchAndSave(activity)` for this action type.
+         * Only surfaced when [ExternalContentLinkClient.isAvailable] is true.
+         */
+        @SerialName("migrate_play_to_web") MIGRATE_PLAY_TO_WEB,
     }
 
     /** Storefront a migration/upgrade offer's source subscription lives on. */

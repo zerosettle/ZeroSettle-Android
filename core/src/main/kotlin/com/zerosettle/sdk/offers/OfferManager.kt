@@ -1,5 +1,6 @@
 package com.zerosettle.sdk.offers
 
+import android.app.Activity
 import com.zerosettle.sdk.core.ZeroSettleLogger
 import com.zerosettle.sdk.models.UserOffer
 import com.zerosettle.sdk.models.ZeroSettleError
@@ -43,6 +44,20 @@ public class OfferManager internal constructor(
     private val executeUpgradeOffer: suspend (fromProductId: String, toProductId: String) -> Result<Unit> = { _, _ -> Result.success(Unit) },
     /** Reports a declined/dismissed upgrade offer to `POST /v1/iap/upgrade-offer/respond/`. No-op for migrations. */
     private val respondUpgradeOffer: suspend (fromProductId: String, toProductId: String, outcome: String) -> Result<Unit> = { _, _, _ -> Result.success(Unit) },
+    /**
+     * Returns `true` when Google's External Content Link (ECL) billing program is
+     * available on the current device/account. Used to gate [UserOffer.ActionType.MIGRATE_PLAY_TO_WEB]
+     * offers — if ECL is unavailable the offer is suppressed (never shown). Injected as a
+     * testable seam; the real implementation delegates to [com.zerosettle.sdk.billing.ExternalContentLinkClient.isAvailable].
+     */
+    private val isEclAvailable: suspend () -> Boolean = { true },
+    /**
+     * Executes the Switch & Save (Play→web) flow for a [UserOffer.ActionType.MIGRATE_PLAY_TO_WEB]
+     * offer. Called from [acceptOffer] when the offer requires an [Activity] anchor for the ECL
+     * disclosure dialog. Injected as a testable seam; the real implementation is
+     * [com.zerosettle.sdk.ZeroSettle.launchSwitchAndSave].
+     */
+    private val launchSwitchAndSave: suspend (Activity) -> Result<Unit> = { Result.failure(ZeroSettleError.SwitchAndSaveUnavailable) },
     private val logger: ZeroSettleLogger? = null,
 ) {
 
@@ -105,6 +120,12 @@ public class OfferManager internal constructor(
             }
             val offer = resp.eligibleOffer
             if (offer == null) { _state.value = OfferState.INELIGIBLE; return }
+            // MIGRATE_PLAY_TO_WEB requires the ECL billing program to be available on this
+            // device. If unavailable, suppress the offer (INELIGIBLE) so non-enrolled users
+            // never see a dead CTA.
+            if (offer.actionType == UserOffer.ActionType.MIGRATE_PLAY_TO_WEB && !isEclAvailable()) {
+                _state.value = OfferState.INELIGIBLE; return
+            }
             _offerData.value = offer
             _state.value = OfferState.PRESENTED
             onEvent(OfferEvent.Shown(offer.checkoutProductId))
@@ -118,9 +139,18 @@ public class OfferManager internal constructor(
      * then go straight to `COMPLETED` (no WebView). Migration / `upgrade_storekit_to_web`:
      * create the web checkout (with the active Play purchase token, when the source is
      * Play, so the backend can cancel that sub), launch it, go to `ACCEPTED`.
+     *
+     * **`MIGRATE_PLAY_TO_WEB` is rejected here.** A Play→web migration must run through
+     * Google's External Content Link flow ([acceptOffer] with an `Activity`) — it must
+     * NEVER fall back to the in-app WebView checkout (a Google Play policy violation).
+     * The no-arg path returns [ZeroSettleError.SwitchAndSaveRequiresActivity] without
+     * touching `createWebCheckout` / `_pendingCheckoutUrl`.
      */
     public suspend fun acceptOffer(): Result<Unit> {
         val offer = _offerData.value ?: return Result.failure(ZeroSettleError.OfferIneligible)
+        if (offer.actionType == UserOffer.ActionType.MIGRATE_PLAY_TO_WEB) {
+            return Result.failure(ZeroSettleError.SwitchAndSaveRequiresActivity)
+        }
         _checkoutError.value = null
         onEvent(OfferEvent.Accepted(offer.checkoutProductId))
 
@@ -145,6 +175,35 @@ public class OfferManager internal constructor(
         }
         _pendingCheckoutUrl.value = url
         launchCheckout(url)
+        _state.value = OfferState.ACCEPTED
+        return Result.success(Unit)
+    }
+
+    /**
+     * Accept a [UserOffer.ActionType.MIGRATE_PLAY_TO_WEB] offer. Routes to
+     * [launchSwitchAndSave] (the ECL billing program) rather than the normal
+     * web-checkout path. On success, state transitions to `ACCEPTED` — the actual
+     * checkout completion happens asynchronously (backend webhook → entitlement event).
+     *
+     * For all other offer types, delegates to the no-arg [acceptOffer].
+     *
+     * @param activity The foreground [Activity] required to anchor the ECL disclosure dialog.
+     */
+    public suspend fun acceptOffer(activity: Activity): Result<Unit> {
+        val offer = _offerData.value ?: return Result.failure(ZeroSettleError.OfferIneligible)
+        if (offer.actionType != UserOffer.ActionType.MIGRATE_PLAY_TO_WEB) {
+            return acceptOffer()
+        }
+
+        _checkoutError.value = null
+        onEvent(OfferEvent.Accepted(offer.checkoutProductId))
+
+        val result = launchSwitchAndSave(activity)
+        if (result.isFailure) {
+            val err = result.exceptionOrNull()
+            _checkoutError.value = err as? ZeroSettleError ?: ZeroSettleError.CheckoutFailed(err?.message ?: "unknown")
+            return Result.failure(err ?: ZeroSettleError.CheckoutFailed("unknown"))
+        }
         _state.value = OfferState.ACCEPTED
         return Result.success(Unit)
     }
@@ -230,9 +289,18 @@ public class OfferManager internal constructor(
      * Escape hatch for custom WebView implementations. Returns the checkout URL, or
      * `null` for `upgrade_web_to_web` (no WebView needed). Does NOT change state — the
      * caller must drive `onWebCheckoutSucceeded()` / `dismiss()` itself.
+     *
+     * **`MIGRATE_PLAY_TO_WEB` is rejected here.** A Play→web migration has no
+     * WebView-checkout URL — it must run through Google's External Content Link flow
+     * ([acceptOffer] with an `Activity`). Returns
+     * [ZeroSettleError.SwitchAndSaveRequiresActivity] rather than minting a Stripe
+     * checkout URL (which would be a Google Play policy violation).
      */
     public suspend fun checkoutUrl(): Result<String?> {
         val offer = _offerData.value ?: return Result.failure(ZeroSettleError.OfferIneligible)
+        if (offer.actionType == UserOffer.ActionType.MIGRATE_PLAY_TO_WEB) {
+            return Result.failure(ZeroSettleError.SwitchAndSaveRequiresActivity)
+        }
         if (offer.isHeadlessUpgrade) return Result.success(null)
         val playToken = if (offer.source == UserOffer.SourceStorefront.PLAY_STORE) activePlayPurchaseTokenProvider() else null
         return createWebCheckout(offer.checkoutProductId, playToken)

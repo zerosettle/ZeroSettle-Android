@@ -102,4 +102,18 @@ public sealed class ZeroSettleError : Exception() {
         private fun readResolve(): Any = SwitchAndSaveUnavailable
         override val message: String = "External Content Link billing program is not available on this device."
     }
+    /**
+     * A `MIGRATE_PLAY_TO_WEB` offer was accepted through a path that cannot run the
+     * Switch & Save (ECL) flow — the no-arg `acceptOffer()` or the `checkoutUrl()`
+     * escape hatch. Play→web migrations must NOT fall back to the in-app WebView
+     * checkout (a Google Play policy violation); they require Google's External
+     * Content Link disclosure dialog, which needs an `Activity` anchor. Call
+     * `acceptOffer(activity)` instead.
+     */
+    public data object SwitchAndSaveRequiresActivity : ZeroSettleError() {
+        private fun readResolve(): Any = SwitchAndSaveRequiresActivity
+        override val message: String =
+            "This Play→web migration offer must be accepted via acceptOffer(activity) " +
+                "— the Switch & Save flow requires an Activity for Google's disclosure dialog."
+    }
 }

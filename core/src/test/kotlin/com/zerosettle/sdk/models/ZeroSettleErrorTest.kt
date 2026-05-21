@@ -27,6 +27,7 @@ class ZeroSettleErrorTest {
             ZeroSettleError.JurisdictionBlocked("UK"),
             ZeroSettleError.NotFound("missing"),
             ZeroSettleError.SwitchAndSaveUnavailable,
+            ZeroSettleError.SwitchAndSaveRequiresActivity,
         )
         cases.forEach { e ->
             val handled: String = when (e) {
@@ -51,6 +52,7 @@ class ZeroSettleErrorTest {
                 is ZeroSettleError.JurisdictionBlocked -> "jb"
                 is ZeroSettleError.NotFound -> "nf"
                 is ZeroSettleError.SwitchAndSaveUnavailable -> "sau"
+                is ZeroSettleError.SwitchAndSaveRequiresActivity -> "sara"
             }
             assertThat(handled).isNotEmpty()
         }
