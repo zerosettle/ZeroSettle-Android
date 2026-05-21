@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.models.UserOffer
 import com.zerosettle.sdk.offers.OfferManager
@@ -56,6 +57,7 @@ public fun ZeroSettleOfferTip(
     val offer by offerManager.offerData.collectAsState()
     val checkoutError by offerManager.checkoutError.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(checkoutError) { checkoutError?.let(onError) }
 
@@ -74,7 +76,14 @@ public fun ZeroSettleOfferTip(
     ZeroSettleOfferTipContent(
         state = state,
         offer = data,
-        onAccept = { scope.launch { offerManager.acceptOffer() } },
+        onAccept = {
+            val activity = context.findActivity()
+            if (activity != null) {
+                scope.launch { offerManager.acceptOffer(activity) }
+            } else {
+                onError(IllegalStateException("ZeroSettleOfferTip: no host Activity found in Context chain"))
+            }
+        },
         onDismiss = { scope.launch { offerManager.dismiss() } },
         modifier = modifier,
         backgroundColor = backgroundColor,

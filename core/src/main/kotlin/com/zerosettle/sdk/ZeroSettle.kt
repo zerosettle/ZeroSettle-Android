@@ -1,6 +1,7 @@
 package com.zerosettle.sdk
 
 import android.content.Context
+import com.zerosettle.sdk.billing.ExternalContentLinkClient
 import com.zerosettle.sdk.core.AppAccountToken
 import com.zerosettle.sdk.core.Backend
 import com.zerosettle.sdk.core.ZeroSettleEvent
@@ -1041,6 +1042,7 @@ public object ZeroSettle {
         val uid = currentUserIdOrNull() ?: throw ZeroSettleError.UserNotIdentified
         val be = backend ?: throw ZeroSettleError.NotConfigured
         val dismissals = offerDismissalStore ?: throw ZeroSettleError.NotConfigured
+        val ctx = appContext ?: throw ZeroSettleError.NotConfigured
         return com.zerosettle.sdk.offers.OfferManager(
             fetchUserOffer = { be.fetchUserOffer(uid) },
             isDismissed = { dismissals.isDismissed(uid) },
@@ -1074,6 +1076,15 @@ public object ZeroSettle {
                 }
             },
             executeUpgradeOffer = { from, to -> be.executeUpgradeOffer(uid, from, to).map { } },
+            isEclAvailable = {
+                val eclClient = ExternalContentLinkClient(ctx)
+                try {
+                    eclClient.isAvailable()
+                } finally {
+                    eclClient.endConnection()
+                }
+            },
+            launchSwitchAndSave = { activity -> launchSwitchAndSave(activity) },
         )
     }
 
