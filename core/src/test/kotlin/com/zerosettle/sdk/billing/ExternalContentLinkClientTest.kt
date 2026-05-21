@@ -35,11 +35,14 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * ExternalContentLinkClient contract (Switch & Save — ECL, Task 2).
+ * ExternalContentLinkClient contract (Switch & Save — ECL, Tasks 2 & 3).
  *
- * The client wraps [BillingClient.isBillingProgramAvailableAsync] for
- * [BillingClient.BillingProgram.EXTERNAL_CONTENT_LINK] and exposes a single
- * suspend entry point: [ExternalContentLinkClient.isAvailable].
+ * The client wraps:
+ *  - [BillingClient.isBillingProgramAvailableAsync] — surfaced via [ExternalContentLinkClient.isAvailable]
+ *  - [BillingClient.createBillingProgramReportingDetailsAsync] — surfaced via
+ *    [ExternalContentLinkClient.newTransactionToken]
+ *
+ * Both entry points share the same connection lifecycle (connect once per ECL session).
  *
  * Because Robolectric cannot provision real Play Services, and BillingClient
  * is abstract with many methods, we use a fake BillingClient subclass that:
@@ -47,6 +50,8 @@ import org.robolectric.RobolectricTestRunner
  *    synchronously with the configured connection response code (OK by default).
  *  - [FakeBillingClient.isBillingProgramAvailableAsync] — fires the listener
  *    synchronously with the configured availability response code.
+ *  - [FakeBillingClient.createBillingProgramReportingDetailsAsync] — fires the listener
+ *    synchronously with the configured reporting response code and token.
  *  - All other abstract methods throw [UnsupportedOperationException] (they
  *    should never be reached by [ExternalContentLinkClient]).
  *
@@ -63,15 +68,20 @@ class ExternalContentLinkClientTest {
      * through the exact async callbacks it relies on.
      *
      * [availabilityResponseCode] controls what [isBillingProgramAvailableAsync] fires.
+     * [reportingResponseCode] controls what [createBillingProgramReportingDetailsAsync] fires.
+     * [reportingToken] is the [externalTransactionToken] returned with a reporting OK response.
      * [connectionResponseCode] controls what [startConnection] fires (defaults to OK
      * so the connect step is transparent unless a test wants a connection failure).
      *
-     * [BillingProgramAvailabilityDetails] has a package-private constructor in
-     * PBL 8.2.1, so we build it via reflection — the production code only reads
-     * [BillingResult.responseCode], not the details object.
+     * [BillingProgramAvailabilityDetails] and [BillingProgramReportingDetails] both
+     * have package-private constructors in PBL 8.2.1, so we build them via reflection.
+     * The production code only reads [BillingResult.responseCode] for availability, and
+     * [BillingProgramReportingDetails.externalTransactionToken] for the reporting token.
      */
     private class FakeBillingClient(
         private val availabilityResponseCode: Int,
+        private val reportingResponseCode: Int = BillingResponseCode.OK,
+        private val reportingToken: String = "",
         private val connectionResponseCode: Int = BillingResponseCode.OK,
     ) : BillingClient() {
 
@@ -151,7 +161,20 @@ class ExternalContentLinkClientTest {
         override fun createBillingProgramReportingDetailsAsync(
             params: BillingProgramReportingDetailsParams,
             listener: BillingProgramReportingDetailsListener,
-        ) = throw UnsupportedOperationException()
+        ) {
+            // BillingProgramReportingDetails(String externalTransactionToken, int billingProgram)
+            // has a package-private constructor in PBL 8.2.1; use reflection to construct it.
+            val detailsCtor = com.android.billingclient.api.BillingProgramReportingDetails::class.java
+                .getDeclaredConstructor(String::class.java, Int::class.java)
+            detailsCtor.isAccessible = true
+            val details = detailsCtor.newInstance(reportingToken, params.billingProgram)
+            listener.onCreateBillingProgramReportingDetailsResponse(
+                BillingResult.newBuilder()
+                    .setResponseCode(reportingResponseCode)
+                    .build(),
+                details,
+            )
+        }
 
         override fun createExternalOfferReportingDetailsAsync(
             listener: ExternalOfferReportingDetailsListener,
@@ -227,5 +250,45 @@ class ExternalContentLinkClientTest {
             ),
         )
         assertThat(client.isAvailable()).isFalse()
+    }
+
+    // ─── newTransactionToken() tests (Task 3) ─────────────────────────────────
+
+    @Test fun newTransactionToken_withOkResponse_returnsSuccessWithToken() = runTest {
+        val client = ExternalContentLinkClient(
+            FakeBillingClient(
+                availabilityResponseCode = BillingClient.BillingResponseCode.OK,
+                reportingResponseCode = BillingClient.BillingResponseCode.OK,
+                reportingToken = "etx_test",
+            ),
+        )
+        val result = client.newTransactionToken()
+        assertThat(result.isSuccess).isTrue()
+        assertThat(result.getOrNull()).isEqualTo("etx_test")
+    }
+
+    @Test fun newTransactionToken_withNonOkResponse_returnsFailure() = runTest {
+        val client = ExternalContentLinkClient(
+            FakeBillingClient(
+                availabilityResponseCode = BillingClient.BillingResponseCode.OK,
+                reportingResponseCode = BillingClient.BillingResponseCode.DEVELOPER_ERROR,
+                reportingToken = "",
+            ),
+        )
+        val result = client.newTransactionToken()
+        assertThat(result.isFailure).isTrue()
+    }
+
+    @Test fun newTransactionToken_whenConnectionFails_returnsFailure() = runTest {
+        val client = ExternalContentLinkClient(
+            FakeBillingClient(
+                availabilityResponseCode = BillingClient.BillingResponseCode.OK,
+                reportingResponseCode = BillingClient.BillingResponseCode.OK,
+                reportingToken = "etx_test",
+                connectionResponseCode = BillingClient.BillingResponseCode.BILLING_UNAVAILABLE,
+            ),
+        )
+        val result = client.newTransactionToken()
+        assertThat(result.isFailure).isTrue()
     }
 }

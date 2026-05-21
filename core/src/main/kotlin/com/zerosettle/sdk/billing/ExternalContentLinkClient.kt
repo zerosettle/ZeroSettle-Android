@@ -4,6 +4,8 @@ import android.content.Context
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingProgramAvailabilityListener
+import com.android.billingclient.api.BillingProgramReportingDetailsListener
+import com.android.billingclient.api.BillingProgramReportingDetailsParams
 import com.android.billingclient.api.BillingResult
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -94,6 +96,28 @@ public class ExternalContentLinkClient(private val client: BillingClient) {
     }
 
     /**
+     * Requests a fresh external transaction token from the Play Billing Library for
+     * the ECL billing program.
+     *
+     * The token is passed to Google's External Content Link launch URL to attribute
+     * the web checkout transaction back to the user's Play account.
+     *
+     * **This token is SINGLE-USE and must NEVER be cached.** Call this method
+     * immediately before opening the Switch & Save web checkout URL — each launch
+     * requires a freshly issued token. Reusing a token will cause the attribution
+     * to fail or be rejected by Google.
+     *
+     * Returns [Result.success] with the [externalTransactionToken] string on
+     * [BillingClient.BillingResponseCode.OK], or [Result.failure] on any billing
+     * error or connection failure.
+     */
+    public suspend fun newTransactionToken(): Result<String> {
+        val connectOk = connect()
+        if (!connectOk) return Result.failure(IllegalStateException("ECL billing connection failed"))
+        return fetchTransactionToken()
+    }
+
+    /**
      * Releases the billing connection. Mirrors [PlayBillingManager.endConnection].
      *
      * Must be called once the Switch & Save ECL session is finished (success,
@@ -133,6 +157,37 @@ public class ExternalContentLinkClient(private val client: BillingClient) {
             BillingClient.BillingProgram.EXTERNAL_CONTENT_LINK,
             BillingProgramAvailabilityListener { result, _ ->
                 cont.resume(result.responseCode == BillingClient.BillingResponseCode.OK)
+            },
+        )
+    }
+
+    /**
+     * Calls [BillingClient.createBillingProgramReportingDetailsAsync] with
+     * [BillingClient.BillingProgram.EXTERNAL_CONTENT_LINK] and suspends until
+     * the [BillingProgramReportingDetailsListener] fires.
+     *
+     * Returns [Result.success] with the [externalTransactionToken] on OK; returns
+     * [Result.failure] on any non-OK [BillingResult.responseCode].
+     */
+    private suspend fun fetchTransactionToken(): Result<String> = suspendCancellableCoroutine { cont ->
+        val params = BillingProgramReportingDetailsParams.newBuilder()
+            .setBillingProgram(BillingClient.BillingProgram.EXTERNAL_CONTENT_LINK)
+            .build()
+        client.createBillingProgramReportingDetailsAsync(
+            params,
+            BillingProgramReportingDetailsListener { result, details ->
+                if (result.responseCode == BillingClient.BillingResponseCode.OK && details != null) {
+                    cont.resume(Result.success(details.externalTransactionToken))
+                } else {
+                    cont.resume(
+                        Result.failure(
+                            IllegalStateException(
+                                "createBillingProgramReportingDetailsAsync failed: " +
+                                    "responseCode=${result.responseCode} debugMessage=${result.debugMessage}",
+                            ),
+                        ),
+                    )
+                }
             },
         )
     }
