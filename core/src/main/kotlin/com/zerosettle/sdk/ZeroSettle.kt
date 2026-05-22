@@ -1235,16 +1235,49 @@ public object ZeroSettle {
     /**
      * Move a Play subscription / non-consumable from its current ZeroSettle owner to
      * the currently-identified user. Destructive — resolves a [PendingClaim]. Posts to
-     * `POST /v1/iap/claim-entitlement/`. Never auto-invoked; the host app calls this
-     * explicitly in response to a `pendingClaims` entry.
+     * `POST /v1/iap/claim-play-entitlement/`. Never auto-invoked; the host app calls
+     * this explicitly in response to a `pendingClaims` entry (iOS parity: manual
+     * claim only).
+     *
+     * The `purchaseToken` and `packageName` needed for the Play claim are sourced
+     * internally — the token from the matching [PendingClaim] (populated by the
+     * conflict sync), the package name from the SDK's own application context.
+     * The caller supplies only [productId], matching iOS's
+     * `transferStoreKitOwnershipToCurrentUser(productId:)` shape.
+     *
+     * Failure modes:
+     *  - no identified user → [ZeroSettleError.UserNotIdentified]
+     *  - SDK not configured → [ZeroSettleError.NotConfigured]
+     *  - no matching [PendingClaim] for [productId], or the matching claim has no
+     *    `purchaseToken` (older backend that predates the field) →
+     *    [ZeroSettleError.NotFound]
+     *  - backend rejection (invalid/unknown token, consumable) →
+     *    [ZeroSettleError.BackendError]
+     *
+     * On success the resolved [PendingClaim] is cleared and entitlements are
+     * refreshed (`restoreEntitlements()` + a poll) so the entitlement lands.
+     *
+     * If multiple pending claims share [productId], the first match is used —
+     * a known Phase-2 limitation; the realistic case is a single claim per product.
      */
-    public suspend fun transferPlayOwnershipToCurrentUser(productId: String, originalTransactionId: String): Result<Unit> {
+    public suspend fun transferPlayOwnershipToCurrentUser(productId: String): Result<Unit> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
-        return (backend ?: return Result.failure(ZeroSettleError.NotConfigured))
-            .claimEntitlement(uid, productId, originalTransactionId)
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        val claim = _pendingClaims.value.firstOrNull { it.productId == productId }
+            ?: return Result.failure(
+                ZeroSettleError.NotFound("No pending claim for product $productId"),
+            )
+        val purchaseToken = claim.purchaseToken
+            ?: return Result.failure(
+                ZeroSettleError.NotFound("Pending claim for product $productId has no Play purchase token"),
+            )
+        val packageName = appContext?.packageName
+            ?: return Result.failure(ZeroSettleError.NotConfigured)
+        return be.claimPlayEntitlement(uid, productId, purchaseToken, packageName)
+            .map { }
             .onSuccess {
                 _pendingClaims.value = _pendingClaims.value.filterNot {
-                    it.productId == productId && it.originalTransactionId == originalTransactionId
+                    it.productId == productId && it.purchaseToken == purchaseToken
                 }
                 scope.scope.launch { restoreEntitlements() }
                 entitlementPoller?.pollNow()

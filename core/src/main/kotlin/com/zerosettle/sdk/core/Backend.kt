@@ -250,6 +250,35 @@ internal class Backend(
     }
 
     /**
+     * `POST /v1/iap/claim-play-entitlement/` — explicit cross-account ownership
+     * transfer for a **Play Billing** subscription / non-consumable.
+     *
+     * The Play sibling of [claimEntitlement]. Where the StoreKit path is keyed on
+     * an Apple-signed JWS, this path is keyed on the Play `purchaseToken` the SDK
+     * obtained from `BillingClient.queryPurchasesAsync()` (i.e. the device's
+     * Google account currently owns it). The backend re-verifies the token
+     * against the Google Play Developer API before transferring.
+     *
+     * Request body: `{user_id, product_id, purchase_token, package_name}`.
+     * Success → `{status:"ok", claimed:true, …}`; already-owned →
+     * `{status:"ok", claimed:false, message:"Already owned by this account"}`.
+     * Both are HTTP 2xx; errors (invalid/unknown token, consumable) surface as
+     * [ZeroSettleError.BackendError] via the [HttpClient] non-2xx mapping.
+     */
+    suspend fun claimPlayEntitlement(
+        userId: String,
+        productId: String,
+        purchaseToken: String,
+        packageName: String,
+    ): Result<ClaimPlayEntitlementResponse> {
+        val body =
+            """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}",""" +
+                """"purchase_token":"${esc(purchaseToken)}","package_name":"${esc(packageName)}"}"""
+        return http.post("/v1/iap/claim-play-entitlement/", body)
+            .mapDecode(ClaimPlayEntitlementResponse.serializer())
+    }
+
+    /**
      * `GET /v1/iap/transaction-history/?user_id=…` — full transaction history
      * for the identified user. Decoded into a typed list at the boundary;
      * decode failures surface as [ZeroSettleError.BackendError]. Mirrors iOS
@@ -507,6 +536,26 @@ internal data class PlaySyncResponse(
     // into a `claim-play-entitlement/` call. Nullable so a backend that predates
     // the field still decodes.
     @SerialName("purchase_token") val purchaseToken: String? = null,
+)
+
+/**
+ * Response from `POST /v1/iap/claim-play-entitlement/`.
+ *
+ * On a successful transfer: `{status:"ok", claimed:true, product_id,
+ * purchase_token, entitlement_states_transferred}`. When the calling user
+ * already owns the entitlement (idempotent re-claim): `{status:"ok",
+ * claimed:false, message:"Already owned by this account"}`. Both are HTTP 2xx
+ * — the caller branches on [claimed] only for logging/UX; the entitlement-
+ * refresh path runs either way.
+ */
+@Serializable
+internal data class ClaimPlayEntitlementResponse(
+    val status: String? = null,
+    val claimed: Boolean = false,
+    @SerialName("product_id") val productId: String? = null,
+    @SerialName("purchase_token") val purchaseToken: String? = null,
+    @SerialName("entitlement_states_transferred") val entitlementStatesTransferred: Int? = null,
+    val message: String? = null,
 )
 
 @Serializable

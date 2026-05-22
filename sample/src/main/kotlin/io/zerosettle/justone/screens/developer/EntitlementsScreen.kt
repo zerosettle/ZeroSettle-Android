@@ -71,7 +71,7 @@ fun EntitlementsScreen() {
                         Text("owned by: ${c.existingOwnerHint}  (origTxn=${c.originalTransactionId})", style = MaterialTheme.typography.bodySmall)
                         Button(onClick = {
                             scope.launch {
-                                val r = ZeroSettle.transferPlayOwnershipToCurrentUser(c.productId, c.originalTransactionId)
+                                val r = ZeroSettle.transferPlayOwnershipToCurrentUser(c.productId)
                                 status = if (r.isSuccess) "claimed ${c.productId}" else "claim failed: ${r.exceptionOrNull()?.message}"
                                 ZeroSettle.restoreEntitlements()
                             }

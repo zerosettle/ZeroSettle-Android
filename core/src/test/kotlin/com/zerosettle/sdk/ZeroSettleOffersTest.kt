@@ -103,12 +103,79 @@ class ZeroSettleOffersTest {
 
     @Test fun transferPlayOwnership_facade_postsClaim() = runTest {
         identify()
-        server.enqueue(MockResponse().setBody("""{}"""))               // claim-entitlement response
+        // Seed a pending claim carrying the Play purchase token, as a conflict
+        // sync would. transferPlayOwnershipToCurrentUser sources the token from it.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"entitlements":[],"pending_claims":[
+                   {"product_id":"pro_monthly","original_transaction_id":"otid_1",
+                    "existing_owner_hint":"al***","purchase_token":"tok_play_1"}]}""",
+            ),
+        )
+        ZeroSettle.restoreEntitlements()
+        server.takeRequest() // drain the entitlements fetch
+        assertThat(ZeroSettle.pendingClaims.first()).hasSize(1)
+
+        server.enqueue(
+            MockResponse().setBody(
+                """{"status":"ok","claimed":true,"product_id":"pro_monthly",
+                   "purchase_token":"tok_play_1","entitlement_states_transferred":1}""",
+            ),
+        )
         server.enqueue(MockResponse().setBody("""{"entitlements":[]}"""))  // restoreEntitlements safety net
-        val res = ZeroSettle.transferPlayOwnershipToCurrentUser(productId = "pro_monthly", originalTransactionId = "otid_1")
+        val res = ZeroSettle.transferPlayOwnershipToCurrentUser(productId = "pro_monthly")
         assertThat(res.isSuccess).isTrue()
         val r = server.takeRequest()
-        assertThat(r.path).isEqualTo("/v1/iap/claim-entitlement/")
-        assertThat(r.body.readUtf8()).contains("\"original_transaction_id\":\"otid_1\"")
+        assertThat(r.path).isEqualTo("/v1/iap/claim-play-entitlement/")
+        val body = r.body.readUtf8()
+        assertThat(body).contains("\"user_id\":\"u1\"")
+        assertThat(body).contains("\"product_id\":\"pro_monthly\"")
+        assertThat(body).contains("\"purchase_token\":\"tok_play_1\"")
+        assertThat(body).contains("\"package_name\":")
+        // The resolved claim is cleared on success.
+        assertThat(ZeroSettle.pendingClaims.first()).isEmpty()
+    }
+
+    @Test fun transferPlayOwnership_noMatchingClaim_returnsNotFound() = runTest {
+        identify()
+        val res = ZeroSettle.transferPlayOwnershipToCurrentUser(productId = "pro_monthly")
+        assertThat(res.isFailure).isTrue()
+        assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.NotFound::class.java)
+    }
+
+    @Test fun transferPlayOwnership_claimWithoutToken_returnsNotFound() = runTest {
+        identify()
+        // A claim from a backend that predates purchase_token → no token to claim with.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"entitlements":[],"pending_claims":[
+                   {"product_id":"pro_monthly","original_transaction_id":"otid_1",
+                    "existing_owner_hint":"al***"}]}""",
+            ),
+        )
+        ZeroSettle.restoreEntitlements()
+        server.takeRequest()
+        val res = ZeroSettle.transferPlayOwnershipToCurrentUser(productId = "pro_monthly")
+        assertThat(res.isFailure).isTrue()
+        assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.NotFound::class.java)
+    }
+
+    @Test fun transferPlayOwnership_backendRejects_returnsFailure() = runTest {
+        identify()
+        server.enqueue(
+            MockResponse().setBody(
+                """{"entitlements":[],"pending_claims":[
+                   {"product_id":"pro_monthly","original_transaction_id":"otid_1",
+                    "existing_owner_hint":"al***","purchase_token":"tok_play_1"}]}""",
+            ),
+        )
+        ZeroSettle.restoreEntitlements()
+        server.takeRequest()
+
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"status":"error"}"""))
+        val res = ZeroSettle.transferPlayOwnershipToCurrentUser(productId = "pro_monthly")
+        assertThat(res.isFailure).isTrue()
+        // The claim is NOT cleared on failure — the user can retry.
+        assertThat(ZeroSettle.pendingClaims.first()).hasSize(1)
     }
 }
