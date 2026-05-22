@@ -56,6 +56,7 @@ fun EnvSwitcherScreen(onIdentified: () -> Unit) {
     var envMenuOpen by remember { mutableStateOf(false) }
     var effectiveUrl by remember { mutableStateOf(SampleConfig.effectiveBaseUrl(ctx)) }
     var eclOverride by remember { mutableStateOf(SampleConfig.loadEclOverride(ctx)) }
+    var switchAndSaveTestMode by remember { mutableStateOf(SampleConfig.loadSwitchAndSaveTestMode(ctx)) }
 
     val configured by ZeroSettle.isConfigured.collectAsState()
     val bootstrapped by ZeroSettle.isBootstrapped.collectAsState()
@@ -170,6 +171,30 @@ fun EnvSwitcherScreen(onIdentified: () -> Unit) {
                     eclOverride = checked
                     SampleConfig.saveEclOverride(ctx, checked)
                     ZeroSettle.eclAvailabilityOverride = if (checked) true else null
+                },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text("Switch & Save full test mode")
+                Text(
+                    "Runs the entire Switch & Save flow on a non-ECL device — fakes the Play " +
+                        "disclosure dialog but mints a real backend session and opens the real " +
+                        "web checkout. Implies “Force ECL available”. Testing only.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = switchAndSaveTestMode,
+                onCheckedChange = { checked ->
+                    switchAndSaveTestMode = checked
+                    SampleConfig.saveSwitchAndSaveTestMode(ctx, checked)
+                    ZeroSettle.switchAndSaveTestMode = checked
                 },
             )
         }

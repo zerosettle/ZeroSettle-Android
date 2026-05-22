@@ -52,6 +52,7 @@ internal object SampleConfig {
     private const val KEY_ENV = "backend_env"
     private const val KEY_CUSTOM_URL = "backend_custom_url"
     private const val KEY_ECL_OVERRIDE = "ecl_availability_override"
+    private const val KEY_SWITCH_AND_SAVE_TEST_MODE = "switch_and_save_test_mode"
     private const val KEY_IDENTITY_TYPE = "identity_type"
     private const val KEY_IDENTITY_USER_ID = "identity_user_id"
     private const val KEY_IDENTITY_NAME = "identity_name"
@@ -86,6 +87,19 @@ internal object SampleConfig {
 
     fun saveEclOverride(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit().putBoolean(KEY_ECL_OVERRIDE, enabled).apply()
+    }
+
+    // When enabled, the sample sets `ZeroSettle.switchAndSaveTestMode = true` so the
+    // entire Switch & Save flow runs on a device/account not enrolled in Google's ECL
+    // program — the Play ECL plumbing is faked but the backend session mint and the web
+    // checkout run for real. Persisted so the choice survives a cold start.
+
+    /** Whether full Switch & Save test mode is enabled (defaults to off). */
+    fun loadSwitchAndSaveTestMode(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_SWITCH_AND_SAVE_TEST_MODE, false)
+
+    fun saveSwitchAndSaveTestMode(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit().putBoolean(KEY_SWITCH_AND_SAVE_TEST_MODE, enabled).apply()
     }
 
     /** The `baseUrlOverride` to pass to `ZeroSettleConfig`, given the persisted env. */
