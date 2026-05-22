@@ -232,6 +232,79 @@ class ZeroSettlePlayBillingTest {
         assertThat(err).isInstanceOf(ZeroSettleError.PlayBillingError::class.java)
     }
 
+    // ─── Launch-time reconciliation ──────────────────────────────────────────
+    //
+    // The PurchasesUpdatedListener only fires while the app is running. A
+    // subscription that renews / changes state while the app is closed is
+    // never observed → never synced → the backend's entitlement goes stale.
+    // reconcileOwnedPurchases() queries Play for what the account actually
+    // owns at launch (and post-identify) and runs each purchase through the
+    // same sync path as a live purchase. These tests use the
+    // reconcileWithPurchasesForTesting seam (the real queryPurchasesAsync
+    // needs Play services Robolectric can't provide).
+
+    @Test fun reconcile_ownedSubsAndInapp_eachSyncedToBackend() = runTest {
+        val syncedTokens = java.util.Collections.synchronizedList(mutableListOf<String>())
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            "/v1/iap/play-store-transactions/" to {
+                MockResponse().setBody("""{"owned":true,"transaction_id":9200,"transaction_ref":"txn_9200"}""")
+            },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        ZeroSettle.playCoordinator!!.reconcileWithPurchasesForTesting(
+            subs = listOf(fakePurchase(token = "sub_tok", productId = "pro_monthly")),
+            inapp = listOf(fakePurchase(token = "inapp_tok", productId = "lifetime")),
+        )
+
+        // Each owned purchase must hit the play-store-transactions sync endpoint.
+        var seen = 0
+        while (seen < 2) {
+            val req = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS) ?: break
+            if (req.path.orEmpty().startsWith("/v1/iap/play-store-transactions/")) {
+                syncedTokens += req.body.readUtf8()
+                seen++
+            }
+        }
+        assertThat(seen).isEqualTo(2)
+        assertThat(syncedTokens.any { it.contains("sub_tok") }).isTrue()
+        assertThat(syncedTokens.any { it.contains("inapp_tok") }).isTrue()
+    }
+
+    @Test fun reconcile_isIdempotent_reRunningWithSamePurchaseSucceeds() = runTest {
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody("""{"products":[]}""") },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            // Already-synced purchase: backend keeps reporting owned=true.
+            "/v1/iap/play-store-transactions/" to {
+                MockResponse().setBody("""{"owned":true,"transaction_id":9201,"transaction_ref":"txn_9201"}""")
+            },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        val owned = listOf(fakePurchase(token = "sub_tok", productId = "pro_monthly"))
+        // Two reconcile passes (e.g. two app launches) must not break — the
+        // sync queue stays empty and no exception escapes.
+        ZeroSettle.playCoordinator!!.reconcileWithPurchasesForTesting(subs = owned, inapp = emptyList())
+        ZeroSettle.playCoordinator!!.reconcileWithPurchasesForTesting(subs = owned, inapp = emptyList())
+
+        assertThat(ZeroSettle.playSyncQueueForTesting().pending()).isEmpty()
+    }
+
+    @Test fun reconcile_withoutIdentifiedUser_isNoOp() = runTest {
+        // No identify() → userIdProvider() is null → reconcile must not touch
+        // the backend (mirrors handlePurchases' null-uid early return).
+        ZeroSettle.playCoordinator?.reconcileWithPurchasesForTesting(
+            subs = listOf(fakePurchase(token = "sub_tok")),
+            inapp = emptyList(),
+        )
+        // The play-store-transactions endpoint is unmocked here; if reconcile
+        // had run it would have issued a request. None expected.
+        assertThat(server.requestCount).isEqualTo(0)
+    }
+
     @Test fun deferredBridge_resolvesEvenWhenAcknowledgeThrows() = runTest {
         // Standalone processor with the same callback wiring as the production
         // coordinator. If `acknowledge` throwing strands the deferred, this test

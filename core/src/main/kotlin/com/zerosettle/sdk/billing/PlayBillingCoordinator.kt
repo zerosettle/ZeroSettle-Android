@@ -175,13 +175,75 @@ internal class PlayBillingCoordinator(
     private val connectivityManager get() = context.getSystemService(ConnectivityManager::class.java)
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    /** Called once after bootstrap. Connects, drains the queue, registers the network callback. */
+    /**
+     * Called once after bootstrap (and on every [identify], which rebuilds and
+     * re-`start()`s the coordinator). Connects, drains the local sync queue,
+     * reconciles owned Play purchases, registers the network callback.
+     */
     fun start() {
         scope.launch {
             billing.ensureConnected().onFailure { logger.warn("billing", "connect failed: ${it.message}") }
             processor.retryQueued()
+            // Reconcile purchases that completed / renewed while the app was not
+            // running — the PurchasesUpdatedListener only fires for the live
+            // session, so a subscription renewal or state change in the
+            // background is otherwise never observed by the SDK. Google's Play
+            // Billing guidance requires querying owned purchases on launch.
+            // Guarded on an identified user: `start()` can run before
+            // `identify()`; `bootstrap()` rebuilds + re-starts the coordinator
+            // after identify, so this fires with a user present on the launch
+            // path. `handlePurchases` early-returns on a null uid for the same
+            // reason.
+            if (userIdProvider() != null) reconcileOwnedPurchases()
         }
         registerNetworkCallback()
+        // TODO: also reconcile on app foreground / Activity onResume — Google
+        // recommends it — once the SDK exposes a lifecycle hook. No such hook
+        // exists today, so don't invent lifecycle plumbing here.
+    }
+
+    /**
+     * Query Play for what the account actually owns (both SUBS and INAPP) and
+     * run each returned [Purchase] through the existing sync path — the same
+     * [PurchaseSyncProcessor.process] call [handlePurchases] uses. Catches
+     * purchases that completed / renewed / changed state while the app was not
+     * running (the [PurchasesUpdatedListener] only fires for the live session).
+     *
+     * Idempotent: `backend.syncPlayPurchase` / `processor.process` already
+     * handle already-synced purchases and ownership conflicts, so this is safe
+     * to run repeatedly (every launch, every identify).
+     *
+     * Best-effort: a failed `queryPurchases` is logged and skipped — reconcile
+     * must never break [start].
+     */
+    suspend fun reconcileOwnedPurchases() {
+        val uid = userIdProvider() ?: return
+        val subs = billing.queryPurchases(BillingClient.ProductType.SUBS)
+            .onFailure { logger.warn("billing", "reconcile: querying SUBS failed: ${it.message}") }
+            .getOrDefault(emptyList())
+        val inapp = billing.queryPurchases(BillingClient.ProductType.INAPP)
+            .onFailure { logger.warn("billing", "reconcile: querying INAPP failed: ${it.message}") }
+            .getOrDefault(emptyList())
+        reconcilePurchases(uid, subs, inapp)
+    }
+
+    /**
+     * Shared reconcile body: sync the given owned [subs] + [inapp] purchases
+     * and signal a possible entitlement change once for the batch. Separated
+     * from [reconcileOwnedPurchases] so [reconcileWithPurchasesForTesting] can
+     * exercise the exact production path without the unmockable
+     * `BillingClient.queryPurchasesAsync` call.
+     */
+    private suspend fun reconcilePurchases(uid: String, subs: List<Purchase>, inapp: List<Purchase>) {
+        logger.info(
+            "billing",
+            "reconcile: found ${subs.size} owned SUBS + ${inapp.size} owned INAPP purchase(s) for uid=$uid — syncing",
+        )
+        if (subs.isEmpty() && inapp.isEmpty()) return
+        for (p in subs + inapp) {
+            processor.process(PlayBillingManager.describePurchase(p, uid, customerNameProvider(), customerEmailProvider()))
+        }
+        onEntitlementsMayHaveChanged()
     }
 
     /** Native Play Billing purchase: query details → launch flow. The result is delivered via [handlePurchases]. */
@@ -235,6 +297,19 @@ internal class PlayBillingCoordinator(
      */
     internal fun simulateListenerForTesting(responseCode: Int, debugMessage: String, purchases: List<Purchase>?) {
         billing.simulateListenerForTesting(responseCode, debugMessage, purchases)
+    }
+
+    /**
+     * Test-only: drive [reconcilePurchases] with injected owned-purchase lists,
+     * skipping the real `BillingClient.queryPurchasesAsync` call (which routes
+     * through `ensureConnected` on a client with no Play services in
+     * Robolectric). Exercises the exact production reconcile path — descriptor
+     * build → `processor.process` → `onEntitlementsMayHaveChanged` — minus the
+     * unmockable Play query. Mirrors [processPurchaseForTesting].
+     */
+    internal suspend fun reconcileWithPurchasesForTesting(subs: List<Purchase>, inapp: List<Purchase>) {
+        val uid = userIdProvider() ?: return
+        reconcilePurchases(uid, subs, inapp)
     }
 
     private fun registerNetworkCallback() {
