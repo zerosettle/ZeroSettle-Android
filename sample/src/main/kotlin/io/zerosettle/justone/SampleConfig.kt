@@ -4,30 +4,48 @@ import android.content.Context
 import com.zerosettle.sdk.Identity
 
 /**
- * Test-harness config. Fill [PUBLISHABLE_KEY] with a sandbox key (`zs_pk_test_…`)
- * from the ZeroSettle dashboard. The backend environment is chosen at runtime on
- * the Sign-in screen (and persisted) — see [Env] / [resolveBaseUrlOverride].
- *
- * The placeholder key below satisfies `ZeroSettleConfig` (only the `zs_pk_test_`
- * prefix is validated) but every backend call 401s until you replace it.
+ * Test-harness config. Each [Env] carries its own sandbox publishable key
+ * (`zs_pk_test_…`, issued under this sample app's applicationId) alongside its
+ * base URL — switching env on the Sign-in screen switches both. Resolve the
+ * active env's key with [resolvePublishableKey].
  */
 internal object SampleConfig {
-    const val PUBLISHABLE_KEY = "zs_pk_test_55cc0bdc80d2a3274238e00f74ca78f668e83f0ad8a46b48"
 
     /**
      * Backend environments selectable from the Sign-in screen.
      * `baseUrl == null` → the SDK's built-in default (production, `https://api.zerosettle.io`).
      * For [CUSTOM] the URL comes from the persisted custom-URL field instead.
      */
-    enum class Env(val label: String, val baseUrl: String?) {
-        PRODUCTION("Production (live API)", "https://api.zerosettle.io"),
+    enum class Env(
+        val label: String,
+        val baseUrl: String?,
+        /** Per-app sandbox publishable key for this env. Empty when one has
+         *  not been issued yet — [resolvePublishableKey] supplies a fallback. */
+        val publishableKey: String,
+    ) {
+        // Prod publishable key not issued yet — empty; resolvePublishableKey
+        // falls back so configure() never sees a blank key.
+        PRODUCTION("Production (live API)", "https://api.zerosettle.io", ""),
         // Adjust if your staging host differs (Render service URL, custom domain, etc.).
-        STAGING("Staging", "https://api-staging.zerosettle.io"),
+        STAGING(
+            "Staging",
+            "https://api-staging.zerosettle.io",
+            "zs_pk_test_bded1f5dddde6f79ac538bff33b70737244a3557555d863c",
+        ),
         // The Android emulator's loopback alias for the host machine's localhost.
         // Requires android:usesCleartextTraffic="true" in the manifest (already set).
-        LOCAL_EMULATOR("Local — emulator (api.zerosettle.ngrok.app)", "https://api.zerosettle.ngrok.app"),
+        LOCAL_EMULATOR(
+            "Local — emulator (api.zerosettle.ngrok.app)",
+            "https://api.zerosettle.ngrok.app",
+            "zs_pk_test_55cc0bdc80d2a3274238e00f74ca78f668e83f0ad8a46b48",
+        ),
         // Free-form: paste an ngrok tunnel, a LAN IP (http://192.168.x.x:8000), etc.
-        CUSTOM("Custom…", null),
+        // Reuses the localhost key — custom URLs in dev are usually local/ngrok.
+        CUSTOM(
+            "Custom…",
+            null,
+            "zs_pk_test_55cc0bdc80d2a3274238e00f74ca78f668e83f0ad8a46b48",
+        ),
     }
 
     private const val PREFS = "zerosettle_sample_prefs"
@@ -77,6 +95,12 @@ internal object SampleConfig {
         Env.LOCAL_EMULATOR -> e.baseUrl
         Env.CUSTOM -> loadCustomUrl(ctx).ifBlank { null }
     }
+
+    /** The publishable key for the persisted env. Falls back to the staging
+     *  key when the env's own key has not been issued yet (e.g. production),
+     *  so `ZeroSettleConfig` never receives a blank key. */
+    fun resolvePublishableKey(ctx: Context): String =
+        loadEnv(ctx).publishableKey.ifBlank { Env.STAGING.publishableKey }
 
     /** Human-readable effective base URL (for display). */
     fun effectiveBaseUrl(ctx: Context): String =

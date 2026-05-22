@@ -18,7 +18,7 @@ internal fun configureSdk(ctx: Context) {
     ZeroSettle.configure(
         ctx.applicationContext,
         ZeroSettleConfig(
-            publishableKey = SampleConfig.PUBLISHABLE_KEY,
+            publishableKey = SampleConfig.resolvePublishableKey(ctx),
             baseUrlOverride = SampleConfig.resolveBaseUrlOverride(ctx),
             syncPlayPurchases = true,
             preloadCheckout = true,

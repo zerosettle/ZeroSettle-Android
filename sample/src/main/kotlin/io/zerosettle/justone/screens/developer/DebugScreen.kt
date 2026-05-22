@@ -75,7 +75,7 @@ fun DebugScreen() {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Config", style = MaterialTheme.typography.titleSmall)
-                Text("publishableKey = ${maskKey(SampleConfig.PUBLISHABLE_KEY)}")
+                Text("publishableKey = ${maskKey(SampleConfig.resolvePublishableKey(ctx))}")
                 Text("env = ${SampleConfig.loadEnv(ctx).label}")
                 Text("baseUrl = ${SampleConfig.effectiveBaseUrl(ctx)}")
                 Text("(change env on the Sign-in screen)")
