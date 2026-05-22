@@ -27,6 +27,30 @@ class ModelSerializationTest {
         val pc = json.decodeFromString(PendingClaim.serializer(), fixture)
         assertThat(pc.productId).isEqualTo("pro_monthly")
         assertThat(pc.existingOwnerHint).isEqualTo("al***")
+        // Older payload without `purchase_token` → field defaults to null.
+        assertThat(pc.purchaseToken).isNull()
+    }
+
+    @Test fun pendingClaim_decodesPurchaseToken() {
+        val fixture = """
+        {"product_id":"pro_monthly","original_transaction_id":"otid",
+         "existing_owner_hint":"al***","purchase_token":"tok_abc123"}
+        """.trimIndent()
+        val pc = json.decodeFromString(PendingClaim.serializer(), fixture)
+        assertThat(pc.purchaseToken).isEqualTo("tok_abc123")
+    }
+
+    @Test fun pendingClaim_roundTripsPurchaseToken() {
+        val original = PendingClaim(
+            productId = "pro_monthly",
+            originalTransactionId = "otid",
+            existingOwnerHint = "al***",
+            purchaseToken = "tok_abc123",
+        )
+        val encoded = json.encodeToString(PendingClaim.serializer(), original)
+        assertThat(encoded).contains("\"purchase_token\":\"tok_abc123\"")
+        val decoded = json.decodeFromString(PendingClaim.serializer(), encoded)
+        assertThat(decoded).isEqualTo(original)
     }
 
     @Test fun userOffer_migrateStorekitToWeb_withPlaySource_decodes() {
