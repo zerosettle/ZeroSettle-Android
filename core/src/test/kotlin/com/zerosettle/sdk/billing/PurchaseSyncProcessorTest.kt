@@ -72,17 +72,44 @@ class PurchaseSyncProcessorTest {
     }
 
     @Test fun process_ownedFalseConflict_publishesPendingClaim_noAck() = runTest {
-        server.enqueue(MockResponse().setBody("""{"owned":false,"conflict":true,"claim_available":true,"existing_owner_hint":"al***"}"""))
+        server.enqueue(
+            MockResponse().setBody(
+                """{"owned":false,"conflict":true,"claim_available":true,
+                   "existing_owner_hint":"al***","purchase_token":"tok_conflict_1"}""",
+            ),
+        )
         var claimSeen: com.zerosettle.sdk.models.PendingClaim? = null
         val proc = PurchaseSyncProcessor(
             backend = backend, queue = queue,
             finalize = { _, _ -> Result.success(Unit) }, emitEvent = { },
             onConflictClaim = { claimSeen = it }, strictAck = false, nowMillis = { 0L },
         )
-        proc.process(descriptor())
+        proc.process(descriptor(token = "tok_conflict_1"))
         assertThat(acked).isEmpty()
         assertThat(claimSeen?.existingOwnerHint).isEqualTo("al***")
+        // The conflicting purchase's device-owned token must flow onto the
+        // PendingClaim so a later transferPlayOwnershipToCurrentUser can key
+        // the Play claim.
+        assertThat(claimSeen?.purchaseToken).isEqualTo("tok_conflict_1")
         assertThat(queue.pending()).isEmpty()
+    }
+
+    @Test fun process_ownedFalseConflict_noBackendEcho_usesDeviceToken() = runTest {
+        // An older backend conflict response omits purchase_token entirely;
+        // the PendingClaim still carries the device-owned descriptor token.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"owned":false,"conflict":true,"claim_available":true,"existing_owner_hint":"al***"}""",
+            ),
+        )
+        var claimSeen: com.zerosettle.sdk.models.PendingClaim? = null
+        val proc = PurchaseSyncProcessor(
+            backend = backend, queue = queue,
+            finalize = { _, _ -> Result.success(Unit) }, emitEvent = { },
+            onConflictClaim = { claimSeen = it }, strictAck = false, nowMillis = { 0L },
+        )
+        proc.process(descriptor(token = "tok_device_only"))
+        assertThat(claimSeen?.purchaseToken).isEqualTo("tok_device_only")
     }
 
     // ─── Deferred-bridge wiring (Task A3) ────────────────────────────────────

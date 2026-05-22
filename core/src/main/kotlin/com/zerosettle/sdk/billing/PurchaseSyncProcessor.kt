@@ -159,6 +159,15 @@ internal class PurchaseSyncProcessor(
                         productId = d.productId,
                         originalTransactionId = resp.transactionRef ?: d.orderId.orEmpty(),
                         existingOwnerHint = resp.existingOwnerHint ?: "another account",
+                        // Carry the Play purchase token so the host app can later
+                        // call transferPlayOwnershipToCurrentUser to claim it.
+                        // The descriptor's token is the device-owned token (from
+                        // BillingClient.queryPurchasesAsync) for the very purchase
+                        // that triggered this conflict — always present and the
+                        // authoritative value. The backend echo (resp.purchaseToken)
+                        // is the same token; prefer the local one so a backend that
+                        // doesn't echo it still yields a usable claim.
+                        purchaseToken = d.purchaseToken,
                     ),
                 )
                 onPurchaseFailed(ZeroSettleError.CheckoutFailed("ownership_conflict"))

@@ -502,6 +502,11 @@ internal data class PlaySyncResponse(
     val conflict: Boolean = false,
     @SerialName("claim_available") val claimAvailable: Boolean = false,
     @SerialName("existing_owner_hint") val existingOwnerHint: String? = null,
+    // The Play Billing `purchaseToken` for the conflicting purchase, echoed back
+    // on a cross-account conflict (`claim_available`) so the SDK can carry it
+    // into a `claim-play-entitlement/` call. Nullable so a backend that predates
+    // the field still decodes.
+    @SerialName("purchase_token") val purchaseToken: String? = null,
 )
 
 @Serializable
