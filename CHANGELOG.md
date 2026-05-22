@@ -1,6 +1,34 @@
 # Changelog
 
-## v2.0.0 — JustOne sample app + UCB SDK fixes — 2026-05-18
+## 1.1.0 — Play entitlement transfer + Switch & Save developer test-mode — 2026-05-22
+
+### SDK (`:core`)
+
+- **New public API — `ZeroSettle.switchAndSaveTestMode: Boolean`:** Testing override
+  that runs the entire Switch & Save (Play→web ECL migration) flow on a device/account
+  NOT enrolled in Google's External Content Link program. When `true`, the Play ECL
+  plumbing — availability check, attribution token, and the disclosure dialog — is faked,
+  while the backend session mint and the Chrome Custom Tab web checkout run for real. It
+  also implies ECL-available for offer eligibility, so the Switch & Save tip surfaces
+  without separately setting `eclAvailabilityOverride`. Leave `false` in production.
+- **Play entitlement transfer:** `PendingClaim` now carries `purchaseToken`; the Play
+  purchase token is carried through the cross-account sync-conflict path; and
+  `transferPlayOwnershipToCurrentUser(productId)` claims a Play-sourced entitlement for
+  the current user.
+- **Reconcile owned Play purchases on start:** `PlayBillingCoordinator.start()` (and
+  every `identify()`) queries Play for owned SUBS + INAPP purchases and runs each through
+  the existing sync path, catching renewals and state changes that completed while the
+  app was not running (the `PurchasesUpdatedListener` only fires for the live session).
+  Idempotent and best-effort — a failed query is logged and skipped.
+
+### Sample app (`:sample` module)
+
+- New "Switch & Save full test mode" developer toggle on the Sign-in screen, mirroring
+  the existing "Force ECL available" toggle.
+- Per-environment publishable keys — each backend environment carries its own sandbox
+  publishable key.
+
+## 1.0.0 — JustOne sample app + UCB SDK fixes — 2026-05-18
 
 ### SDK (`:core`)
 
