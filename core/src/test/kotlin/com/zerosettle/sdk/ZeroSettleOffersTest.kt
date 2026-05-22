@@ -70,6 +70,34 @@ class ZeroSettleOffersTest {
         assertThat(mgr.offerData.first()?.source).isEqualTo(UserOffer.SourceStorefront.PLAY_STORE)
     }
 
+    @Test fun offerManager_evaluate_switchAndSaveTestMode_surfacesPlayMigrationTip() = runTest {
+        // Phase 3 implication: switchAndSaveTestMode = true alone makes the MIGRATE_PLAY_TO_WEB
+        // ECL gate resolve available — the offer tip surfaces without setting eclAvailabilityOverride.
+        identify()
+        server.enqueue(
+            MockResponse().setBody(
+                """{"user_id":"u1","app_id":1,"is_sandbox":true,
+                  "subscription":{"type":"active_storekit","product_id":"pro_monthly"},
+                  "offer":{"action_type":"migrate_play_to_web","is_eligible":true,
+                    "checkout_product_id":"pro_monthly_web","from_product_id":"pro_monthly","savings_percent":20,
+                    "free_trial_days":7,"min_subscription_days":14,"rollout_percent":100,
+                    "requires_apple_cancel":false,"checkout_presentation":"webview","source":"play_store"},
+                  "server_time":"2026-05-12T00:00:00Z"}""",
+            ),
+        )
+        ZeroSettle.eclAvailabilityOverride = null
+        ZeroSettle.switchAndSaveTestMode = true
+        try {
+            val mgr = ZeroSettle.offerManager()
+            mgr.evaluate()
+            // PRESENTED proves isEclAvailable() resolved true via the test-mode short-circuit —
+            // without it, the MIGRATE_PLAY_TO_WEB ECL gate would suppress the offer (INELIGIBLE).
+            assertThat(mgr.state.first()).isEqualTo(com.zerosettle.sdk.offers.OfferManager.OfferState.PRESENTED)
+        } finally {
+            ZeroSettle.switchAndSaveTestMode = false
+        }
+    }
+
     @Test fun fetchUserOffer_facade_returnsResponse() = runTest {
         identify()
         server.enqueue(

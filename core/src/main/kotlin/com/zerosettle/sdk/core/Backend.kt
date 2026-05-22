@@ -337,8 +337,8 @@ internal class Backend(
      * that is opened via [ExternalContentLinkClient.launch] — it carries an opaque
      * session token only; no PII is embedded in the URL.
      *
-     * **Note:** this endpoint is built in Task 9 and does not yet exist on the server.
-     * The SDK-side call is implemented now; the test mocks this method directly.
+     * The endpoint treats [externalTransactionToken] as opaque — it persists the token
+     * for later Google UCB reporting but does not verify it against Google at mint time.
      */
     suspend fun mintSwitchAndSaveSession(
         userId: String,
