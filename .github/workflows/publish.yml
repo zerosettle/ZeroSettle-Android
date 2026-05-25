@@ -1,0 +1,93 @@
+# Publish to Maven Central on tag push.
+#
+# Triggers on bare-semver tags (e.g. `1.1.1`) — see `git tag` history for the
+# convention; no `v` prefix.
+#
+# ────────────────────────────────────────────────────────────────────────────
+# One-time setup
+# ────────────────────────────────────────────────────────────────────────────
+#
+# Add the following secrets under Repo → Settings → Secrets and variables →
+# Actions:
+#
+#   MAVEN_CENTRAL_USERNAME       Sonatype Central Portal user-token username
+#                                (https://central.sonatype.com/account →
+#                                "Generate User Token").
+#   MAVEN_CENTRAL_PASSWORD       Sonatype Central Portal user-token password.
+#
+#   SIGNING_KEY_ID               Last 8 hex chars of the GPG key fingerprint
+#                                used to sign releases.
+#                                Get it with: `gpg --list-secret-keys --keyid-format=short`
+#   SIGNING_KEY_PASSWORD         Passphrase for that GPG key.
+#   SIGNING_KEY                  ASCII-armored secret key, *base64-encoded*.
+#                                Produce it with:
+#                                    gpg --armor --export-secret-keys SIGNING_KEY_ID | base64
+#                                (one line, no wrapping — `base64` on macOS does this by
+#                                default; on Linux use `base64 -w0`).
+#
+# That's it. No file storage, no decode step at runtime — vanniktech's
+# `com.vanniktech.maven.publish` plugin reads the in-memory key directly via
+# the `signingInMemoryKey*` project properties (Gradle auto-maps env vars
+# prefixed `ORG_GRADLE_PROJECT_` to project properties).
+#
+# ────────────────────────────────────────────────────────────────────────────
+# What this does
+# ────────────────────────────────────────────────────────────────────────────
+#
+# 1. Verifies that the tag matches `VERSION_NAME` in gradle.properties so a
+#    stale tag can't ship a mismatched coordinate.
+# 2. Runs `:core` unit tests as a final guard rail.
+# 3. Runs `:core:publishAndReleaseToMavenCentral` and the same for `:ui` —
+#    this uploads signed artifacts to the Sonatype Central Portal and
+#    auto-releases them (one-shot, no manual portal click). Indexing on
+#    central.maven.org typically settles in 10–30 min.
+
+name: Publish to Maven Central
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  publish:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Verify tag matches VERSION_NAME
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION=$(grep '^VERSION_NAME=' gradle.properties | cut -d= -f2)
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Tag '$TAG' does not match gradle.properties VERSION_NAME='$VERSION'"
+            exit 1
+          fi
+          echo "Publishing $VERSION."
+
+      - name: Run :core unit tests
+        run: ./gradlew :core:testDebugUnitTest --no-daemon
+
+      - name: Publish to Maven Central
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          ./gradlew \
+            :core:publishAndReleaseToMavenCentral \
+            :ui:publishAndReleaseToMavenCentral \
+            --no-daemon --no-configuration-cache

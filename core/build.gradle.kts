@@ -86,8 +86,16 @@ mavenPublishing {
     // signing — the cross-repo Flutter plugin workflow consumes those
     // unsigned local artifacts. Maven Central enforces signed uploads
     // at the server side, so unsigned dev builds can't accidentally ship.
+    //
+    // Accepts two signing flavours:
+    //  - keyring file: `signing.keyId` / `signing.password` / `signing.secretKeyRingFile`
+    //    (the local-dev path, matches `~/.gradle/gradle.properties`).
+    //  - in-memory key: `signingInMemoryKey` / `signingInMemoryKeyId` /
+    //    `signingInMemoryKeyPassword` (the CI path; vanniktech's plugin reads these
+    //    directly when present, so we just need to flip on signAllPublications()).
     if (project.hasProperty("signing.keyId") ||
-        System.getenv("ORG_GRADLE_PROJECT_signing.keyId") != null) {
+        System.getenv("ORG_GRADLE_PROJECT_signing.keyId") != null ||
+        project.hasProperty("signingInMemoryKey")) {
         signAllPublications()
     }
     coordinates(
