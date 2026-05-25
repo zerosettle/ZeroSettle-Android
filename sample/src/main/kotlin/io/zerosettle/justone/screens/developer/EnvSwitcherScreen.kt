@@ -55,7 +55,6 @@ fun EnvSwitcherScreen(onIdentified: () -> Unit) {
     var customUrl by remember { mutableStateOf(SampleConfig.loadCustomUrl(ctx)) }
     var envMenuOpen by remember { mutableStateOf(false) }
     var effectiveUrl by remember { mutableStateOf(SampleConfig.effectiveBaseUrl(ctx)) }
-    var eclOverride by remember { mutableStateOf(SampleConfig.loadEclOverride(ctx)) }
     var switchAndSaveTestMode by remember { mutableStateOf(SampleConfig.loadSwitchAndSaveTestMode(ctx)) }
 
     val configured by ZeroSettle.isConfigured.collectAsState()
@@ -156,35 +155,12 @@ fun EnvSwitcherScreen(onIdentified: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                Text("Force ECL available")
-                Text(
-                    "Bypasses the Play ECL check so the Switch & Save offer tip surfaces on " +
-                        "devices/accounts not enrolled in Google's ECL program. Testing only — " +
-                        "leave off for production behavior.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(
-                checked = eclOverride,
-                onCheckedChange = { checked ->
-                    eclOverride = checked
-                    SampleConfig.saveEclOverride(ctx, checked)
-                    ZeroSettle.eclAvailabilityOverride = if (checked) true else null
-                },
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(Modifier.weight(1f).padding(end = 12.dp)) {
                 Text("Switch & Save full test mode")
                 Text(
                     "Runs the entire Switch & Save flow on a non-ECL device — fakes the Play " +
-                        "disclosure dialog but mints a real backend session and opens the real " +
-                        "web checkout. Implies “Force ECL available”. Testing only.",
+                        "ECL availability/token/disclosure plumbing but mints a real backend " +
+                        "session and opens the real web checkout. Surfaces the offer tip too. " +
+                        "Testing only — leave off for production behavior.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

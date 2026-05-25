@@ -24,10 +24,6 @@ internal fun configureSdk(ctx: Context) {
             preloadCheckout = true,
         ),
     )
-    // Re-apply the persisted Switch & Save (ECL) testing override. `true` forces
-    // the ECL availability check to pass so the offer tip surfaces on devices
-    // not enrolled in Google's ECL program; `null` (toggle off) = real query.
-    ZeroSettle.eclAvailabilityOverride = if (SampleConfig.loadEclOverride(ctx)) true else null
     // Re-apply the persisted full Switch & Save test mode. `true` runs the whole
     // flow (faked Play ECL plumbing, real backend mint + web checkout) on non-ECL
     // devices; it also implies ECL-available, so the offer tip surfaces too.

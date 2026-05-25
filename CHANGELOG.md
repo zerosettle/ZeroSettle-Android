@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.1 — Soft-deprecate `eclAvailabilityOverride` — 2026-05-25
+
+### SDK (`:core`)
+
+- **Deprecated `ZeroSettle.eclAvailabilityOverride`.** The flag only affected
+  the Switch & Save offer-gate visibility — the real `launchSwitchAndSave()`
+  flow still queried Play Billing for ECL availability, producing a "live" tip
+  whose CTA errored with `SwitchAndSaveUnavailable` on non-enrolled devices.
+  Use `ZeroSettle.switchAndSaveTestMode` instead — it gates the offer AND fakes
+  the launch-side Play ECL plumbing so the full flow runs end-to-end on a
+  non-ECL device. The property still works; callers receive a deprecation
+  warning. Will be removed in a future major.
+
+### Sample app (`:sample`)
+
+- Removed the "Force ECL available" toggle from the Sign-in screen. The remaining
+  "Switch & Save full test mode" toggle is the single end-to-end Switch & Save
+  testing switch.
+
 ## 1.1.0 — Play entitlement transfer + Switch & Save developer test-mode — 2026-05-22
 
 ### SDK (`:core`)

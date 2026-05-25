@@ -69,7 +69,21 @@ public object ZeroSettle {
      * force-fail it) so developers can exercise the Switch & Save UI without
      * an ECL-enrolled device/account. Leave `null` in production — when
      * `null`, the real Play Billing query runs.
+     *
+     * **Deprecated.** This flag only affects offer-gate visibility — the real
+     * [launchSwitchAndSave] flow still queries Play Billing for ECL availability
+     * and fails on non-enrolled devices, producing a "live" tip whose CTA
+     * errors with [com.zerosettle.sdk.models.ZeroSettleError.SwitchAndSaveUnavailable].
+     * Use [switchAndSaveTestMode] instead — it forces the offer gate AND fakes
+     * the launch-side Play ECL plumbing so the entire flow runs end-to-end on a
+     * non-ECL device.
      */
+    @Deprecated(
+        message = "Use switchAndSaveTestMode instead — it forces the offer gate AND lets the " +
+            "entire Switch & Save flow run on a non-ECL device. eclAvailabilityOverride " +
+            "only affects the offer gate, so the resulting CTA errors with " +
+            "SwitchAndSaveUnavailable when tapped on a non-ECL device.",
+    )
     @Volatile public var eclAvailabilityOverride: Boolean? = null
 
     /**
@@ -1116,6 +1130,7 @@ public object ZeroSettle {
             },
             executeUpgradeOffer = { from, to -> be.executeUpgradeOffer(uid, from, to).map { } },
             isEclAvailable = {
+                @Suppress("DEPRECATION") // internal read of own deprecated property
                 when {
                     switchAndSaveTestMode -> {
                         logger?.warn(
@@ -1130,7 +1145,8 @@ public object ZeroSettle {
                         logger?.warn(
                             "OfferManager",
                             "ECL availability OVERRIDDEN to $forced via ZeroSettle.eclAvailabilityOverride " +
-                                "(testing only — must be null in production builds)",
+                                "(deprecated — use switchAndSaveTestMode for end-to-end testing; " +
+                                "this flag only affects the offer gate, not the Switch & Save launch flow)",
                         )
                         forced
                     }

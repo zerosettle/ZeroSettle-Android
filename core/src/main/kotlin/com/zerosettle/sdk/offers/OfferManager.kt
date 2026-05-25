@@ -138,7 +138,7 @@ public class OfferManager internal constructor(
                     "OfferManager",
                     "evaluate → INELIGIBLE: MIGRATE_PLAY_TO_WEB (Switch & Save) offer for " +
                         "${offer.checkoutProductId} suppressed — ECL unavailable on this device/account. " +
-                        "Set ZeroSettle.eclAvailabilityOverride = true to test without an ECL-enrolled device.",
+                        "Set ZeroSettle.switchAndSaveTestMode = true to exercise the full flow without an ECL-enrolled device.",
                 )
                 _state.value = OfferState.INELIGIBLE; return
             }

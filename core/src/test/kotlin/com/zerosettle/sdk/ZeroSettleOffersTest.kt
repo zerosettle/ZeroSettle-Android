@@ -85,7 +85,8 @@ class ZeroSettleOffersTest {
                   "server_time":"2026-05-12T00:00:00Z"}""",
             ),
         )
-        ZeroSettle.eclAvailabilityOverride = null
+        @Suppress("DEPRECATION") // exercising the soft-deprecated reset path alongside the replacement
+        run { ZeroSettle.eclAvailabilityOverride = null }
         ZeroSettle.switchAndSaveTestMode = true
         try {
             val mgr = ZeroSettle.offerManager()

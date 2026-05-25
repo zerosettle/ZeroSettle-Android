@@ -51,7 +51,6 @@ internal object SampleConfig {
     private const val PREFS = "zerosettle_sample_prefs"
     private const val KEY_ENV = "backend_env"
     private const val KEY_CUSTOM_URL = "backend_custom_url"
-    private const val KEY_ECL_OVERRIDE = "ecl_availability_override"
     private const val KEY_SWITCH_AND_SAVE_TEST_MODE = "switch_and_save_test_mode"
     private const val KEY_IDENTITY_TYPE = "identity_type"
     private const val KEY_IDENTITY_USER_ID = "identity_user_id"
@@ -77,18 +76,6 @@ internal object SampleConfig {
 
     // ── Switch & Save (ECL) testing override ────────────────────────────
     //
-    // When enabled, the sample sets `ZeroSettle.eclAvailabilityOverride = true`
-    // so the Switch & Save offer tip surfaces even on devices/accounts not
-    // enrolled in Google's External Content Link program. Persisted so the
-    // choice survives a cold start; re-applied by `configureSdk`.
-
-    /** Whether the ECL availability override is enabled (defaults to off). */
-    fun loadEclOverride(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_ECL_OVERRIDE, false)
-
-    fun saveEclOverride(ctx: Context, enabled: Boolean) {
-        prefs(ctx).edit().putBoolean(KEY_ECL_OVERRIDE, enabled).apply()
-    }
-
     // When enabled, the sample sets `ZeroSettle.switchAndSaveTestMode = true` so the
     // entire Switch & Save flow runs on a device/account not enrolled in Google's ECL
     // program — the Play ECL plumbing is faked but the backend session mint and the web
