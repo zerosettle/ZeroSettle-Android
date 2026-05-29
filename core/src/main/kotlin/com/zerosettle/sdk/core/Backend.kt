@@ -118,6 +118,14 @@ internal class Backend(
         return http.post("/v1/iap/migration-converted/", body).map { }
     }
 
+    suspend fun reportOfferViewed(
+        userId: String, productId: String, sessionId: String, variantId: Int?, flowType: String,
+    ): Result<Unit> {
+        val variantField = if (variantId != null) ""","variant_id":$variantId""" else ""
+        val body = """{"user_id":"${esc(userId)}","product_id":"${esc(productId)}","session_id":"${esc(sessionId)}","flow_type":"${esc(flowType)}"$variantField}"""
+        return http.post("/v1/iap/offer-viewed/", body).map { }
+    }
+
     // ─── Subscription management ───────────────────────────────────────────
 
     /** `POST /v1/iap/subscriptions/cancel/` — cancels a web-checkout subscription. */

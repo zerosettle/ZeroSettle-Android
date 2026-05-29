@@ -459,6 +459,7 @@ public object ZeroSettle {
         _entitlements.value = emptyList()
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
+        _currentOffer.value = null
         // Rebuild the coordinator synchronously so a subsequent identify()
         // re-enables Play sync immediately. The OLD coordinator's shutdown
         // (clearing the queue, unregistering the network callback, ending
@@ -542,6 +543,13 @@ public object ZeroSettle {
     private val _pendingCheckout = MutableStateFlow(false)
     public val pendingCheckout: StateFlow<Boolean> = _pendingCheckout.asStateFlow()
     internal fun setPendingCheckout(value: Boolean) { _pendingCheckout.value = value }
+
+    /** Stable per-launch session id — generated once when the object is initialised. */
+    public val sessionId: String = java.util.UUID.randomUUID().toString()
+
+    private val _currentOffer = kotlinx.coroutines.flow.MutableStateFlow<com.zerosettle.sdk.offers.ResolvedOffer?>(null)
+    public val currentOffer: kotlinx.coroutines.flow.StateFlow<com.zerosettle.sdk.offers.ResolvedOffer?> = _currentOffer.asStateFlow()
+    internal fun setCurrentOffer(o: com.zerosettle.sdk.offers.ResolvedOffer?) { _currentOffer.value = o }
 
     private val _events = MutableSharedFlow<ZeroSettleEvent>(extraBufferCapacity = 32)
     public val events: SharedFlow<ZeroSettleEvent> = _events.asSharedFlow()
@@ -1164,6 +1172,7 @@ public object ZeroSettle {
             },
             launchSwitchAndSave = { activity -> launchSwitchAndSave(activity) },
             logger = logger,
+            setCurrentOffer = ::setCurrentOffer,
         )
     }
 

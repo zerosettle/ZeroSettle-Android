@@ -59,6 +59,7 @@ public class OfferManager internal constructor(
      */
     private val launchSwitchAndSave: suspend (Activity) -> Result<Unit> = { Result.failure(ZeroSettleError.SwitchAndSaveUnavailable) },
     private val logger: ZeroSettleLogger? = null,
+    private val setCurrentOffer: (ResolvedOffer?) -> Unit = {},
 ) {
 
     public enum class OfferState { LOADING, INELIGIBLE, ELIGIBLE, PRESENTED, ACCEPTED, COMPLETED, DISMISSED, ERROR }
@@ -111,6 +112,7 @@ public class OfferManager internal constructor(
         try {
             if (isDismissed()) {
                 logger?.info("OfferManager", "evaluate → INELIGIBLE: offer was dismissed locally by this user")
+                setCurrentOffer(null)
                 _state.value = OfferState.INELIGIBLE; return
             }
             val resp = fetchUserOffer().getOrElse { err ->
@@ -128,6 +130,7 @@ public class OfferManager internal constructor(
                     "evaluate → INELIGIBLE: backend returned no eligible offer " +
                         "(is_eligible=false or action_type=no_action)",
                 )
+                setCurrentOffer(null)
                 _state.value = OfferState.INELIGIBLE; return
             }
             // MIGRATE_PLAY_TO_WEB requires the ECL billing program to be available on this
@@ -140,9 +143,11 @@ public class OfferManager internal constructor(
                         "${offer.checkoutProductId} suppressed — ECL unavailable on this device/account. " +
                         "Set ZeroSettle.switchAndSaveTestMode = true to exercise the full flow without an ECL-enrolled device.",
                 )
+                setCurrentOffer(null)
                 _state.value = OfferState.INELIGIBLE; return
             }
             _offerData.value = offer
+            setCurrentOffer(ResolvedOffer(offer.checkoutProductId, offer.experimentVariantId, offer.actionType.toFlowString()))
             _state.value = OfferState.PRESENTED
             logger?.info("OfferManager", "evaluate → PRESENTED: ${offer.actionType} offer for ${offer.checkoutProductId}")
             onEvent(OfferEvent.Shown(offer.checkoutProductId))
@@ -288,6 +293,7 @@ public class OfferManager internal constructor(
             respondUpgradeOffer(from, offer.checkoutProductId, "dismissed")
         }
         persistDismissal()
+        setCurrentOffer(null)
         _state.value = OfferState.DISMISSED
         offer?.let { onEvent(OfferEvent.Dismissed(it.checkoutProductId)) }
     }
@@ -322,4 +328,10 @@ public class OfferManager internal constructor(
         val playToken = if (offer.source == UserOffer.SourceStorefront.PLAY_STORE) activePlayPurchaseTokenProvider() else null
         return createWebCheckout(offer.checkoutProductId, playToken)
     }
+}
+
+private fun com.zerosettle.sdk.models.UserOffer.ActionType.toFlowString(): String = when (this) {
+    com.zerosettle.sdk.models.UserOffer.ActionType.MIGRATE_STOREKIT_TO_WEB,
+    com.zerosettle.sdk.models.UserOffer.ActionType.MIGRATE_PLAY_TO_WEB -> "migration"
+    else -> "upgrade"
 }
