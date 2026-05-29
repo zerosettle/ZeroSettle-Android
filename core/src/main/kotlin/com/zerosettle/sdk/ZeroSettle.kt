@@ -1268,6 +1268,24 @@ public object ZeroSettle {
         return (backend ?: return Result.failure(ZeroSettleError.NotConfigured)).trackMigrationConversion(uid, wire)
     }
 
+    /**
+     * Fire-and-forget impression report for an offer view
+     * (`POST /v1/iap/offer-viewed/`). Safe to call from any thread; never throws.
+     * Resolves the current user, falling back to `"anonymous"` when no identity
+     * has been set. Uses the SDK's background [scope] — mirrors the fire-and-forget
+     * pattern used for other non-blocking backend calls in this object.
+     */
+    public fun reportOfferViewed(
+        productId: String,
+        variantId: Int? = null,
+        flowType: String = "migration",
+    ) {
+        val uid = currentUserId.value?.ifEmpty { "anonymous" } ?: "anonymous"
+        scope.scope.launch {
+            runCatching { backend?.reportOfferViewed(uid, productId, sessionId, variantId, flowType) }
+        }
+    }
+
     // ─── Subscription management ───────────────────────────────────────────
 
     public suspend fun cancelSubscription(productId: String, immediate: Boolean = false): Result<Unit> {
