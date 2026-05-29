@@ -118,7 +118,7 @@ public fun ZeroSettleOfferTipContent(
 
     @Composable
     fun card(content: @Composable () -> Unit) = Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().offerImpression(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = surface),
     ) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() } }
