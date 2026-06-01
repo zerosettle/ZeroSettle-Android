@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 — On-screen offer-impression tracking — 2026-06-01
+
+- `Modifier.offerImpression()` — report a ≥50%-on-screen impression once per session for any composable; auto-resolves the active offer via `ZeroSettle.currentOffer`.
+- `ZeroSettle.reportOfferViewed(productId, variantId, flowType)` — low-level fire-and-forget report.
+- `ZeroSettleOfferTip` now reports its own impressions through the modifier.
+
 ## 1.1.1 — Soft-deprecate `eclAvailabilityOverride` — 2026-05-25
 
 ### SDK (`:core`)
