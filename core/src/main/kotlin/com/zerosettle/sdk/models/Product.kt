@@ -80,6 +80,80 @@ internal object PriceSerializer : KSerializer<Price> {
 }
 
 /**
+ * Trial delivery mode. Mirrors iOS `ZSTrialMode`.
+ *
+ * `fromWireOrNull` returns null for any unrecognized wire value — the
+ * [NullableTrialFactsSerializer] uses this to null the entire [TrialFacts]
+ * object rather than crashing (or inserting an UNKNOWN sentinel). The product
+ * itself continues to decode normally.
+ */
+public enum class TrialMode(public val wire: String) {
+    FREE("free"),
+    PAID("paid"),
+    AUTH_HOLD("auth_hold");
+
+    public companion object {
+        public fun fromWireOrNull(value: String): TrialMode? =
+            entries.firstOrNull { it.wire == value }
+    }
+}
+
+/**
+ * Describes the trial configuration for a product. Mirrors iOS `ZSTrialFacts`.
+ *
+ * This class is decoded via [NullableTrialFactsSerializer]. If the backend emits
+ * an unrecognized `mode` value, the serializer returns null so [Product.trial]
+ * is null rather than crashing.
+ */
+@Serializable
+public data class TrialFacts(
+    val mode: TrialMode,
+    val duration: String? = null,
+    @SerialName("upfront_amount_cents") val upfrontAmountCents: Int = 0,
+    @SerialName("hold_amount_cents") val holdAmountCents: Int = 0,
+    @SerialName("validates_card") val validatesCard: Boolean = false,
+)
+
+@Serializable
+private data class TrialFactsRaw(
+    val mode: String,
+    val duration: String? = null,
+    @SerialName("upfront_amount_cents") val upfrontAmountCents: Int = 0,
+    @SerialName("hold_amount_cents") val holdAmountCents: Int = 0,
+    @SerialName("validates_card") val validatesCard: Boolean = false,
+)
+
+/**
+ * Custom serializer for `TrialFacts?` that returns null when the `mode` wire
+ * value is not recognized. This prevents an unknown future trial mode from
+ * crashing the parent [Product] decode — the product decodes normally with
+ * `trial = null`.
+ *
+ * Kotlinx calls this serializer only when the JSON key is present (an absent
+ * `trial` key uses `Product.trial`'s `= null` default without invoking this
+ * serializer at all).
+ */
+internal object NullableTrialFactsSerializer : KSerializer<TrialFacts?> {
+    private val raw = TrialFactsRaw.serializer()
+    override val descriptor: SerialDescriptor = raw.descriptor
+
+    override fun deserialize(decoder: Decoder): TrialFacts? {
+        val r = raw.deserialize(decoder)
+        val mode = TrialMode.fromWireOrNull(r.mode) ?: return null
+        return TrialFacts(mode, r.duration, r.upfrontAmountCents, r.holdAmountCents, r.validatesCard)
+    }
+
+    override fun serialize(encoder: Encoder, value: TrialFacts?) {
+        if (value != null) {
+            raw.serialize(
+                encoder,
+                TrialFactsRaw(value.mode.wire, value.duration, value.upfrontAmountCents, value.holdAmountCents, value.validatesCard),
+            )
+        }
+    }
+}
+
+/**
  * Canonical product with storefront-specific prices. Mirrors iOS `ZSProduct`.
  *
  * Any of [webPrice] / [appStorePrice] / [playStorePrice] may be null — opt-in per
@@ -114,6 +188,9 @@ public data class Product(
     @SerialName("is_trial_eligible") val isTrialEligible: Boolean? = null,
     @SerialName("play_product_id") val playProductId: String? = null,
     @SerialName("play_base_plan_id") val playBasePlanId: String? = null,
+    @SerialName("trial")
+    @Serializable(with = NullableTrialFactsSerializer::class)
+    val trial: TrialFacts? = null,
 )
 
 @Serializable

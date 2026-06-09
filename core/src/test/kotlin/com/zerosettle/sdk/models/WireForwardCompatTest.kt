@@ -83,4 +83,14 @@ class WireForwardCompatTest {
         )
         assertThat(encoded).isEqualTo("\"play_store\"")
     }
+
+    @Test fun product_unknownTrialMode_nullsTrialButKeepsProduct() {
+        val fixture = """
+        {"id":"pro","display_name":"Pro","product_description":"d","type":"auto_renewable_subscription",
+         "trial":{"mode":"future_mode","duration":"1_week","upfront_amount_cents":0,"hold_amount_cents":0,"validates_card":false}}
+        """.trimIndent()
+        val p = json.decodeFromString(Product.serializer(), fixture)
+        assertThat(p.trial).isNull()
+        assertThat(p.id).isEqualTo("pro")
+    }
 }

@@ -77,4 +77,46 @@ class ProductTest {
         assertThat(cat.products).hasSize(1)
         assertThat(cat.products[0].id).isEqualTo("pro_monthly")
     }
+
+    @Test fun decode_paidTrial_populatesTrialFacts() {
+        val trialFixture = """
+        {"id":"pro","display_name":"Pro","product_description":"d","type":"auto_renewable_subscription",
+         "free_trial_duration":"P7D","is_trial_eligible":true,
+         "trial":{"mode":"paid","duration":"1_week","upfront_amount_cents":100,"hold_amount_cents":0,"validates_card":true}}
+        """.trimIndent()
+        val p = json.decodeFromString(Product.serializer(), trialFixture)
+        assertThat(p.trial).isNotNull()
+        assertThat(p.trial!!.mode).isEqualTo(TrialMode.PAID)
+        assertThat(p.trial!!.upfrontAmountCents).isEqualTo(100)
+        assertThat(p.trial!!.holdAmountCents).isEqualTo(0)
+        assertThat(p.trial!!.validatesCard).isTrue()
+        assertThat(p.trial!!.duration).isEqualTo("1_week")
+    }
+
+    @Test fun decode_authHoldTrial_populatesTrialFacts() {
+        val trialFixture = """
+        {"id":"pro","display_name":"Pro","product_description":"d","type":"auto_renewable_subscription",
+         "trial":{"mode":"auth_hold","duration":"1_week","upfront_amount_cents":0,"hold_amount_cents":100,"validates_card":true}}
+        """.trimIndent()
+        val p = json.decodeFromString(Product.serializer(), trialFixture)
+        assertThat(p.trial!!.mode).isEqualTo(TrialMode.AUTH_HOLD)
+        assertThat(p.trial!!.holdAmountCents).isEqualTo(100)
+        assertThat(p.trial!!.validatesCard).isTrue()
+    }
+
+    @Test fun decode_freeTrial_populatesTrialFacts() {
+        val trialFixture = """
+        {"id":"pro","display_name":"Pro","product_description":"d","type":"auto_renewable_subscription",
+         "trial":{"mode":"free","duration":"1_week","upfront_amount_cents":0,"hold_amount_cents":0,"validates_card":false}}
+        """.trimIndent()
+        val p = json.decodeFromString(Product.serializer(), trialFixture)
+        assertThat(p.trial!!.mode).isEqualTo(TrialMode.FREE)
+        assertThat(p.trial!!.validatesCard).isFalse()
+    }
+
+    @Test fun decode_noTrialObject_trialIsNull() {
+        val trialFixture = """{"id":"pro","display_name":"Pro","product_description":"d","type":"auto_renewable_subscription"}""".trimIndent()
+        val p = json.decodeFromString(Product.serializer(), trialFixture)
+        assertThat(p.trial).isNull()
+    }
 }
