@@ -143,8 +143,11 @@ internal object NullableTrialFactsSerializer : KSerializer<TrialFacts?> {
         return TrialFacts(mode, r.duration, r.upfrontAmountCents, r.holdAmountCents, r.validatesCard)
     }
 
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     override fun serialize(encoder: Encoder, value: TrialFacts?) {
-        if (value != null) {
+        if (value == null) {
+            encoder.encodeNull()
+        } else {
             raw.serialize(
                 encoder,
                 TrialFactsRaw(value.mode.wire, value.duration, value.upfrontAmountCents, value.holdAmountCents, value.validatesCard),

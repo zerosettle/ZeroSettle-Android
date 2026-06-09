@@ -119,4 +119,17 @@ class ProductTest {
         val p = json.decodeFromString(Product.serializer(), trialFixture)
         assertThat(p.trial).isNull()
     }
+
+    @Test fun encode_thenDecode_roundTripsTrialFacts() {
+        val original = Product(
+            id = "pro", displayName = "Pro", productDescription = "d",
+            type = ProductType.AUTO_RENEWABLE_SUBSCRIPTION,
+            trial = TrialFacts(TrialMode.PAID, "1_week", 100, 0, true),
+        )
+        val encoded = json.encodeToString(Product.serializer(), original)
+        assertThat(encoded).contains("\"mode\":\"paid\"")
+        assertThat(encoded).contains("upfront_amount_cents")
+        val back = json.decodeFromString(Product.serializer(), encoded)
+        assertThat(back.trial).isEqualTo(original.trial)
+    }
 }
