@@ -79,6 +79,47 @@ already paid); with `strictAck = true` it never acks without backend validation 
 a terminal `ZeroSettleEvent.SyncFailed`. The queue drains on launch, on network regain,
 and after each purchase event; `logout()` clears it.
 
+## Google Play alternative billing (UCB / External Offers) setup
+
+Routing purchases through ZeroSettle's web checkout on Android runs under Google's
+alternative-billing programs. Enrollment is a one-time Play Console step; the rest is
+dashboard configuration — the SDK and backend handle every token and reporting
+obligation.
+
+**1. Enroll in Play Console.** Play Console → **Settings → Alternative billing**.
+Three programs exist:
+
+- **User choice billing (UCB)** — pilot program. Play shows a choice screen and the
+  user picks between Google Play billing and your billing system. Available in the
+  EEA, India, Japan, Brazil, South Korea, Australia, the US (non-gaming apps), and
+  Indonesia.
+- **Alternative billing only (DMA, EEA)** — your billing system replaces Google Play
+  billing entirely in the EEA; no choice screen.
+- **External offers (DMA, EEA)** — link out of the app to a web purchase flow.
+
+**2. Flip the matching toggles in the ZeroSettle dashboard.** `/compliance` →
+**Google Play Reporting → Programs**. The toggles map 1:1 onto Google's enrollment:
+eight per-region UCB toggles (EEA, India, Japan, Brazil, South Korea, Australia,
+US non-gaming, Indonesia), one **DMA EEA alternative billing only** toggle, and one
+**External Offers** toggle. Only enable what you have actually enrolled in — the
+toggles drive both checkout routing and Google-side transaction reporting.
+
+**3. No app code.** When UCB is enabled the SDK mints the `externalTransactionToken`
+automatically via Play Billing: `UcbChoiceHandler` captures it from Google's
+choice-screen callback, and `ExternalContentLinkClient` obtains the reporting token
+for the link-out programs. The token is forwarded to the backend when the checkout
+is initiated; nothing is exposed on the public API surface.
+
+**4. Reporting is server-side.** The backend reports each external transaction to
+Google's `externaltransactions` API within Google's 24-hour deadline — including
+renewals (linked to the originating transaction via `initialExternalTransactionId`;
+no fresh device token is needed) and refunds.
+
+**Test purchases.** License-tester purchases are flagged by Google
+(`testPurchase` on the purchase resource) — Google knows they are tests. Stripe-test
+(sandbox) purchases made against a `zs_pk_test_…` key are never reported to Google:
+there is no Google sandbox API, so any report would create a real production record.
+
 ## Subscription management
 
 ```kotlin
