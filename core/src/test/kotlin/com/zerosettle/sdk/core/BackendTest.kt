@@ -31,6 +31,34 @@ class BackendTest {
         val recorded = server.takeRequest()
         assertThat(recorded.path).contains("/v1/iap/products/")
         assertThat(recorded.path).contains("user_id=u1")
+        // No storefront passed → query must NOT carry the param.
+        assertThat(recorded.path).doesNotContain("storefront")
+    }
+
+    @Test fun fetchProducts_appendsStorefrontWhenProvided() = runTest {
+        server.enqueue(MockResponse().setBody("""{"products":[]}"""))
+        backend.fetchProducts(userId = "u1", storefront = "FR")
+        val recorded = server.takeRequest()
+        assertThat(recorded.path).contains("user_id=u1")
+        assertThat(recorded.path).contains("storefront=FR")
+    }
+
+    @Test fun fetchProducts_omitsBlankStorefront() = runTest {
+        server.enqueue(MockResponse().setBody("""{"products":[]}"""))
+        backend.fetchProducts(userId = "u1", storefront = "")
+        assertThat(server.takeRequest().path).doesNotContain("storefront")
+    }
+
+    @Test fun fetchProducts_decodesCheckoutRoute() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"products":[{"id":"p","display_name":"P","product_description":"",
+                   "type":"auto_renewable_subscription","checkout_route":"store"}]}""",
+            ),
+        )
+        val res = backend.fetchProducts(userId = "u1")
+        assertThat(res.isSuccess).isTrue()
+        assertThat(res.getOrNull()?.products?.first()?.checkoutRoute).isEqualTo("store")
     }
 
     @Test fun fetchEntitlements_decodesEntitlementsAndPendingActions() = runTest {
@@ -69,6 +97,25 @@ class BackendTest {
         val recorded = server.takeRequest()
         assertThat(recorded.path).isEqualTo("/v1/iap/checkout-configs/")
         assertThat(recorded.body.readUtf8()).contains("\"play_purchase_token\":\"tok\"")
+    }
+
+    @Test fun createWebCheckout_sendsStorefrontWhenProvided() = runTest {
+        server.enqueue(MockResponse().setBody("""{"checkout_url":"https://x"}"""))
+        backend.createWebCheckout(
+            userId = "u1", productId = "p", playPurchaseToken = null,
+            customerName = null, customerEmail = null, storefront = "FR",
+        )
+        val body = server.takeRequest().body.readUtf8()
+        assertThat(body).contains("\"storefront\":\"FR\"")
+    }
+
+    @Test fun createWebCheckout_omitsStorefrontWhenNull() = runTest {
+        server.enqueue(MockResponse().setBody("""{"checkout_url":"https://x"}"""))
+        backend.createWebCheckout(
+            userId = "u1", productId = "p", playPurchaseToken = null,
+            customerName = null, customerEmail = null, storefront = null,
+        )
+        assertThat(server.takeRequest().body.readUtf8()).doesNotContain("storefront")
     }
 
     @Test fun dismissMigrationAction_postsUrlAndBody() = runTest {

@@ -27,7 +27,12 @@ public fun Modifier.offerImpression(
         val resolved = if (productId != null) Triple(productId, variantId, flowType ?: "migration")
             else ZeroSettle.currentOffer.value?.let { Triple(it.productId, it.variantId, it.flowType) }
             ?: return@onGloballyPositioned
-        val uid = ZeroSettle.currentUserId.value?.ifEmpty { "anonymous" } ?: "anonymous"
+        // Suppress until an identity exists — reportOfferViewed no-ops pre-identify
+        // (anonymous would collapse distinct users into one impression bucket).
+        // Return BEFORE consuming the dedupe key so the impression still reports
+        // once the user is identified later in the same session.
+        val uid = ZeroSettle.currentUserId.value
+        if (uid.isNullOrBlank()) return@onGloballyPositioned
         val key = "$uid:${ZeroSettle.sessionId}:${resolved.second ?: -1}"
         if (!dedupe.shouldReport(key)) return@onGloballyPositioned
         ZeroSettle.reportOfferViewed(resolved.first, resolved.second, resolved.third)

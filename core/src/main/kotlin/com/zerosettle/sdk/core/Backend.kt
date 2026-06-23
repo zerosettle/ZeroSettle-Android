@@ -28,10 +28,23 @@ internal class Backend(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false; explicitNulls = false }
 
-    /** `GET /v1/iap/products/?user_id=…` — full canonical catalog. */
-    suspend fun fetchProducts(userId: String): Result<ProductCatalog> =
-        http.get("/v1/iap/products/?user_id=${enc(userId)}")
-            .mapDecode(ProductCatalog.serializer())
+    /**
+     * `GET /v1/iap/products/?user_id=…[&storefront=…]` — full canonical catalog.
+     *
+     * [storefront] is the device's ISO 3166-1 alpha-2 country code (UPPERCASE,
+     * e.g. `"US"`, `"FR"`). It feeds the backend's geo gate so a geo-targeted
+     * pricing/routing/trial experiment assigns this user the same variant at
+     * DISPLAY time that the CHECKOUT will charge — without it, geo experiments
+     * assign no one at display (api/iap_views.py:1651). Omitted from the query
+     * when null/blank to preserve behavior for non-geo experiments.
+     */
+    suspend fun fetchProducts(userId: String, storefront: String? = null): Result<ProductCatalog> {
+        val path = buildString {
+            append("/v1/iap/products/?user_id=").append(enc(userId))
+            if (!storefront.isNullOrBlank()) append("&storefront=").append(enc(storefront))
+        }
+        return http.get(path).mapDecode(ProductCatalog.serializer())
+    }
 
     /**
      * `GET /v1/iap/play-billing-config/` — tenant-level UCB configuration. Fetched
@@ -81,11 +94,13 @@ internal class Backend(
         playPurchaseToken: String?,
         customerName: String?,
         customerEmail: String?,
+        storefront: String? = null,
     ): Result<CheckoutConfigResponse> {
         val req = CheckoutConfigRequest(
             userId = userId, productId = productId,
             playPurchaseToken = playPurchaseToken,
             customerName = customerName, customerEmail = customerEmail,
+            storefront = storefront,
         )
         val body = json.encodeToString(CheckoutConfigRequest.serializer(), req)
         return http.post("/v1/iap/checkout-configs/", body).mapCheckoutBody()
@@ -480,6 +495,13 @@ internal data class CheckoutConfigRequest(
     @SerialName("play_purchase_token") val playPurchaseToken: String? = null,
     @SerialName("customer_name") val customerName: String? = null,
     @SerialName("customer_email") val customerEmail: String? = null,
+    // Device storefront country (ISO 3166-1 alpha-2, UPPERCASE). Sent so a
+    // geo-targeted pricing/trial experiment resolves the SAME variant at
+    // checkout that it did at display — the backend's geo gate runs on every
+    // resolve (api/services/experiment_service.py:203), so a checkout without
+    // it would drop the geo cohort and charge a different price than displayed.
+    // Omitted from the JSON when null (encodeDefaults=false + explicitNulls=false).
+    val storefront: String? = null,
 )
 
 @Serializable

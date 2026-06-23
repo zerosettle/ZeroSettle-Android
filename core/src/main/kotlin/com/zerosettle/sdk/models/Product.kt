@@ -194,6 +194,22 @@ public data class Product(
     @SerialName("trial")
     @Serializable(with = NullableTrialFactsSerializer::class)
     val trial: TrialFacts? = null,
+    /**
+     * Where the backend wants THIS cohort to check out: `"web"` (Stripe web
+     * checkout) or `"store"` (route to Play Billing). Driven by a
+     * checkout_routing experiment (api/iap_views.py:1937).
+     *
+     * ORTHOGONAL to [webPrice]: `"web"` does NOT imply a web price is present —
+     * a Play/StoreKit-only product (web storefront not opted in) returns
+     * `checkout_route == "web"` with `web_price == null`. So the routing rule is:
+     * use web checkout only when `checkoutRoute == "web"` AND `webPrice != null`;
+     * otherwise (route `"store"` OR no web price) route to Play Billing.
+     * [com.zerosettle.sdk.ZeroSettle.purchase] applies exactly this.
+     *
+     * Nullable / defensive: the backend always emits it, but an older backend
+     * (or a decode that drops it) leaves it null, treated as `"web"`.
+     */
+    @SerialName("checkout_route") val checkoutRoute: String? = null,
 )
 
 @Serializable

@@ -65,6 +65,106 @@ class ZeroSettleWebPurchaseTest {
     }
 
     /**
+     * checkout_route honoring: when the catalog marks a product's cohort as
+     * `"store"`, purchase() must delegate to Play Billing rather than web
+     * checkout. Here `syncPlayPurchases = false` (setUp) means the Play
+     * coordinator is null, so the delegated purchaseViaPlayBilling surfaces
+     * NotConfigured honestly — we assert that error AND that the web
+     * checkout-configs endpoint was never hit (no silent web fallback).
+     */
+    @Test fun purchase_withStoreRoute_delegatesToPlayBilling() = runBlocking<Unit> {
+        var checkoutConfigsHit = false
+        server.dispatcher = routeBy(mapOf(
+            // Has a web_price, so the store signal is checkout_route alone — isolates
+            // the route signal from the orthogonal web_price-null signal.
+            "/v1/iap/products/" to { MockResponse().setBody(
+                """{"products":[{"id":"pro_monthly","display_name":"Pro","product_description":"",
+                   "type":"auto_renewable_subscription","checkout_route":"store",
+                   "web_price":{"amount_micros":50000000,"currency_code":"USD"}}]}""",
+            ) },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            "/v1/iap/checkout-configs/" to {
+                checkoutConfigsHit = true
+                MockResponse().setBody("""{"checkout_url":"https://c/x"}""")
+            },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        val res = ZeroSettle.purchase(activity, productId = "pro_monthly")
+
+        // Routed to Play Billing → coordinator null → NotConfigured (not a web error).
+        assertThat(res.isFailure).isTrue()
+        assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.NotConfigured::class.java)
+        // Must NOT have silently fallen back to a (priceless) web checkout.
+        assertThat(checkoutConfigsHit).isFalse()
+        assertThat(ZeroSettle.pendingCheckout.value).isFalse()
+    }
+
+    /**
+     * Orthogonality regression: checkout_route and web_price are independent
+     * store signals. A Play/StoreKit-only product returns `checkout_route="web"`
+     * but `web_price=null` — purchase() must route it to Play Billing, NOT to a
+     * priceless web checkout. (This is the exact path that silently mis-routed
+     * before the orthogonal rule.) `syncPlayPurchases=false` → coordinator null →
+     * NotConfigured surfaces, and checkout-configs must never be hit.
+     */
+    @Test fun purchase_withWebRouteButNoWebPrice_delegatesToPlayBilling() = runBlocking<Unit> {
+        var checkoutConfigsHit = false
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody(
+                """{"products":[{"id":"pro_monthly","display_name":"Pro","product_description":"",
+                   "type":"auto_renewable_subscription","checkout_route":"web"}]}""",
+            ) },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            "/v1/iap/checkout-configs/" to {
+                checkoutConfigsHit = true
+                MockResponse().setBody("""{"checkout_url":"https://c/x"}""")
+            },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        val res = ZeroSettle.purchase(activity, productId = "pro_monthly")
+
+        assertThat(res.isFailure).isTrue()
+        assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.NotConfigured::class.java)
+        assertThat(checkoutConfigsHit).isFalse()
+        assertThat(ZeroSettle.pendingCheckout.value).isFalse()
+    }
+
+    /**
+     * Web route WITH a web_price → genuine web checkout (the orthogonal positive
+     * case). Confirms the new rule didn't over-route: a fully web-eligible
+     * product still drives the web flow.
+     */
+    @Test fun purchase_withWebRouteAndWebPrice_usesWebCheckout() = runBlocking<Unit> {
+        server.dispatcher = routeBy(mapOf(
+            "/v1/iap/products/" to { MockResponse().setBody(
+                """{"products":[{"id":"pro_monthly","display_name":"Pro","product_description":"",
+                   "type":"auto_renewable_subscription","checkout_route":"web",
+                   "web_price":{"amount_micros":50000000,"currency_code":"USD"}}]}""",
+            ) },
+            "/v1/iap/entitlements/" to { MockResponse().setBody("""{"entitlements":[]}""") },
+            "/v1/iap/checkout-configs/" to { MockResponse().setBody("""{"checkout_url":"https://c/x"}""") },
+            "/v1/iap/transactions/" to { MockResponse().setBody(
+                """{"id":"txn_1","product_id":"pro_monthly","status":"completed","source":"web_checkout","purchased_at":"2026-05-11T00:00:00Z"}""",
+            ) },
+        ))
+        ZeroSettle.identify(Identity.User(id = "u1"))
+
+        val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val deferredPurchase = scope.async { ZeroSettle.purchase(activity, productId = "pro_monthly") }
+        // Web path sets pendingCheckout — proves we did NOT route to Play Billing.
+        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        ZeroSettle.completeWebCheckout("zerosettle://checkout/return?status=success&transaction_id=txn_1")
+        val res = withTimeout(5000) { deferredPurchase.await() }
+        assertThat(res.isSuccess).isTrue()
+        assertThat(res.getOrNull()?.id).isEqualTo("txn_1")
+    }
+
+    /**
      * End-to-end: purchase() drives the Custom Tab launch, sets pendingCheckout, then
      * suspends until completeWebCheckout() arrives and refetches the hydrated record.
      */

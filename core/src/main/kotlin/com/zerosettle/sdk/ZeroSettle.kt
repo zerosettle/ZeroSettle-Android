@@ -347,7 +347,7 @@ public object ZeroSettle {
 
     private suspend fun bootstrap(userId: String): Result<ProductCatalog?> {
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
-        val products = be.fetchProducts(userId).getOrElse { return Result.failure(it) }
+        val products = be.fetchProducts(userId, deviceStorefrontCountry()).getOrElse { return Result.failure(it) }
         val entResp = be.fetchEntitlements(userId).getOrElse { return Result.failure(it) }
         _products.value = products.products
         _entitlements.value = entResp.entitlements
@@ -566,6 +566,27 @@ public object ZeroSettle {
     internal fun currentCustomerName(): String? = customerName
     internal fun currentCustomerEmail(): String? = customerEmail
 
+    /**
+     * Device region as an ISO 3166-1 alpha-2 country code (UPPERCASE), or null
+     * when unavailable. Sent as the `storefront` query param on the products
+     * fetch so geo-targeted experiments resolve the same variant at DISPLAY time
+     * that the checkout charges.
+     *
+     * Tradeoff: this is the **device region** (from the active locale), NOT the
+     * Play Store storefront. The accurate Play storefront comes from
+     * `BillingClient.getBillingConfigAsync().countryCode`, but the first products
+     * fetch happens during [bootstrap] before the [com.zerosettle.sdk.billing.PlayBillingCoordinator]
+     * connects its BillingClient — so it isn't available yet, and reordering
+     * bootstrap around it would entangle the catalog fetch with Play-services
+     * availability (non-GMS devices, billing-unavailable). Device region is the
+     * best signal available without that coupling and is correct for the common
+     * case (device locale matches the Play storefront).
+     */
+    internal fun deviceStorefrontCountry(): String? =
+        appContext?.resources?.configuration?.locales
+            ?.takeIf { !it.isEmpty }?.get(0)?.country
+            ?.takeIf { it.isNotBlank() }?.uppercase()
+
     public fun recommendedAppAccountToken(): UUID {
         val uid = requireUserId()
         val pkg = appContext?.packageName ?: throw ZeroSettleError.NotConfigured
@@ -582,7 +603,7 @@ public object ZeroSettle {
     public suspend fun fetchProducts(): Result<ProductCatalog> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
-        return be.fetchProducts(uid).onSuccess { _products.value = it.products }
+        return be.fetchProducts(uid, deviceStorefrontCountry()).onSuccess { _products.value = it.products }
     }
 
     /**
@@ -707,6 +728,34 @@ public object ZeroSettle {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
 
+        // Decide web checkout vs Play Billing. `checkout_route` and `web_price`
+        // are ORTHOGONAL store signals — either alone routes to Play:
+        //   - checkout_route == "store": a checkout_routing experiment placed
+        //     this user in the store cohort.
+        //   - web_price == null: this is a Play/StoreKit-only product (web
+        //     storefront not opted in), which returns checkout_route == "web"
+        //     but has no web price to charge.
+        // Use WEB only when checkout_route == "web" AND web_price != null;
+        // otherwise route to Play Billing. Identify "store" POSITIVELY (route
+        // == "store" || webPrice == null) rather than route != "web" so an
+        // older backend that doesn't emit checkout_route (route == null, with a
+        // web_price) still uses web — backward compat, since such backends
+        // predate routing experiments. An id missing from the catalog (product
+        // == null) falls through to web: the backend is the source of truth and
+        // can resolve/reject it, whereas Play would instantly ProductNotFound.
+        //
+        // If Play Billing isn't configured (no coordinator / syncPlayPurchases
+        // off), purchaseViaPlayBilling surfaces NotConfigured honestly — we do
+        // NOT silently fall back to a priceless web checkout.
+        val prod = product(productId)
+        if (prod != null && (prod.checkoutRoute == "store" || prod.webPrice == null)) {
+            config?.logger?.info(
+                "checkout",
+                "routing $productId to Play Billing (checkout_route=${prod.checkoutRoute}, web_price=${if (prod.webPrice == null) "null" else "set"})",
+            )
+            return purchaseViaPlayBilling(activity, productId)
+        }
+
         // Arm the bridge BEFORE any suspension so two parallel callers can't both
         // pass the concurrent-call guard and clobber each other's deferred. The
         // assignment + null-check are both on the JVM main reference, and pairs
@@ -720,6 +769,7 @@ public object ZeroSettle {
         val createResult = be.createWebCheckout(
             userId = uid, productId = productId, playPurchaseToken = null,
             customerName = customerName, customerEmail = customerEmail,
+            storefront = deviceStorefrontCountry(),
         )
         val resp = createResult.getOrElse {
             // Network/decoding error before we ever launched the tab — release
@@ -1109,7 +1159,8 @@ public object ZeroSettle {
             isDismissed = { dismissals.isDismissed(uid) },
             persistDismissal = { dismissals.dismiss(uid) },
             createWebCheckout = { productId, playToken ->
-                be.createWebCheckout(uid, productId, playToken, customerName, customerEmail).map { it.checkoutUrl }
+                be.createWebCheckout(uid, productId, playToken, customerName, customerEmail, deviceStorefrontCountry())
+                    .map { it.checkoutUrl }
             },
             activePlayPurchaseTokenProvider = {
                 _entitlements.value.firstOrNull {
@@ -1271,16 +1322,23 @@ public object ZeroSettle {
     /**
      * Fire-and-forget impression report for an offer view
      * (`POST /v1/iap/offer-viewed/`). Safe to call from any thread; never throws.
-     * Resolves the current user, falling back to `"anonymous"` when no identity
-     * has been set. Uses the SDK's background [scope] — mirrors the fire-and-forget
-     * pattern used for other non-blocking backend calls in this object.
+     * Uses the SDK's background [scope] — mirrors the fire-and-forget pattern used
+     * for other non-blocking backend calls in this object.
+     *
+     * No-op until an identity exists. Previously this fell back to the literal
+     * `user_id="anonymous"` before [identify], which collapses every distinct
+     * pre-identify user into one bucket and poisons experiment impression
+     * denominators. After `identify(Anonymous)`, [currentUserId] is a stable
+     * persisted UUID (not the literal), so suppressing only the null/blank case
+     * still reports anonymous-but-identified users with a distinct id.
      */
     public fun reportOfferViewed(
         productId: String,
         variantId: Int? = null,
         flowType: String = "migration",
     ) {
-        val uid = currentUserId.value?.ifEmpty { "anonymous" } ?: "anonymous"
+        val uid = currentUserId.value
+        if (uid.isNullOrBlank()) return
         scope.scope.launch {
             runCatching { backend?.reportOfferViewed(uid, productId, sessionId, variantId, flowType) }
         }
