@@ -307,6 +307,27 @@ public object ZeroSettle {
     @Volatile private var customerEmail: String? = null
 
     /**
+     * Storefront country snapshot for the current identified session, captured
+     * once at [bootstrap] and reused for BOTH the products fetch (DISPLAY) and
+     * every subsequent web checkout (CHARGE) until the next [identify] / [logout].
+     *
+     * Why a snapshot: [deviceStorefrontCountry] reads the live device locale,
+     * which can change between when products are displayed and when checkout
+     * charges (the user switches region, or the system locale flips). A
+     * geo-targeted pricing experiment resolves its variant from the `storefront`
+     * value, so a divergent live read at charge time could DISPLAY one variant's
+     * price and CHARGE another's. Snapshotting at bootstrap pins display and
+     * charge to the same value for the session.
+     *
+     * Holds the snapshot verbatim — including a legitimately-null read (locale
+     * unavailable). [resolveStorefrontCountry] gates on identity rather than
+     * `snapshot ?: liveRead()` so a null snapshot does NOT fall through to a
+     * fresh live read (which would reintroduce the divergence). Re-snapshotted
+     * only on a new identity/session; cleared on [logout].
+     */
+    @Volatile private var sessionStorefrontCountry: String? = null
+
+    /**
      * Declare who the host app is acting on behalf of and bootstrap the SDK.
      *
      * Behaviour:
@@ -347,7 +368,13 @@ public object ZeroSettle {
 
     private suspend fun bootstrap(userId: String): Result<ProductCatalog?> {
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
-        val products = be.fetchProducts(userId, deviceStorefrontCountry()).getOrElse { return Result.failure(it) }
+        // Snapshot the storefront ONCE for this identified session, before the
+        // products fetch below. Every downstream display/charge call resolves
+        // against this pinned value via resolveStorefrontCountry() so a device
+        // region change between display and checkout can't diverge the
+        // geo-targeted experiment variant. See [sessionStorefrontCountry].
+        sessionStorefrontCountry = deviceStorefrontCountry()
+        val products = be.fetchProducts(userId, resolveStorefrontCountry()).getOrElse { return Result.failure(it) }
         val entResp = be.fetchEntitlements(userId).getOrElse { return Result.failure(it) }
         _products.value = products.products
         _entitlements.value = entResp.entitlements
@@ -454,6 +481,7 @@ public object ZeroSettle {
         _currentUserId.value = null
         customerName = null
         customerEmail = null
+        sessionStorefrontCountry = null
         _isBootstrapped.value = false
         _products.value = emptyList()
         _entitlements.value = emptyList()
@@ -568,9 +596,13 @@ public object ZeroSettle {
 
     /**
      * Device region as an ISO 3166-1 alpha-2 country code (UPPERCASE), or null
-     * when unavailable. Sent as the `storefront` query param on the products
-     * fetch so geo-targeted experiments resolve the same variant at DISPLAY time
-     * that the checkout charges.
+     * when unavailable, read LIVE from the active locale. This is the *source*
+     * for the per-session storefront snapshot ([sessionStorefrontCountry]) — it
+     * is read once at [bootstrap] and pinned; what's actually sent on products
+     * fetches and checkouts is [resolveStorefrontCountry] (the snapshot), so a
+     * mid-session locale change can't diverge display from charge. Reading this
+     * directly returns the *current* live value and should not be used on a
+     * display/charge path — use [resolveStorefrontCountry].
      *
      * Tradeoff: this is the **device region** (from the active locale), NOT the
      * Play Store storefront. The accurate Play storefront comes from
@@ -586,6 +618,22 @@ public object ZeroSettle {
         appContext?.resources?.configuration?.locales
             ?.takeIf { !it.isEmpty }?.get(0)?.country
             ?.takeIf { it.isNotBlank() }?.uppercase()
+
+    /**
+     * Storefront country to send on a products fetch or web checkout. Returns the
+     * per-session snapshot ([sessionStorefrontCountry]) captured at [bootstrap]
+     * once a user is identified, so display and charge can't diverge if the
+     * device region changes mid-session.
+     *
+     * Gating is on identity, NOT on the snapshot being non-null: when a user is
+     * identified we return [sessionStorefrontCountry] verbatim — even if it's
+     * null — rather than falling back to a fresh [deviceStorefrontCountry] read,
+     * which would reintroduce the divergence this snapshot exists to prevent.
+     * The live read is used only in the no-identity defensive case (no bootstrap
+     * has run, so no display/charge pairing exists yet).
+     */
+    internal fun resolveStorefrontCountry(): String? =
+        if (_currentUserId.value != null) sessionStorefrontCountry else deviceStorefrontCountry()
 
     public fun recommendedAppAccountToken(): UUID {
         val uid = requireUserId()
@@ -603,7 +651,7 @@ public object ZeroSettle {
     public suspend fun fetchProducts(): Result<ProductCatalog> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
-        return be.fetchProducts(uid, deviceStorefrontCountry()).onSuccess { _products.value = it.products }
+        return be.fetchProducts(uid, resolveStorefrontCountry()).onSuccess { _products.value = it.products }
     }
 
     /**
@@ -769,7 +817,7 @@ public object ZeroSettle {
         val createResult = be.createWebCheckout(
             userId = uid, productId = productId, playPurchaseToken = null,
             customerName = customerName, customerEmail = customerEmail,
-            storefront = deviceStorefrontCountry(),
+            storefront = resolveStorefrontCountry(),
         )
         val resp = createResult.getOrElse {
             // Network/decoding error before we ever launched the tab — release
@@ -1159,7 +1207,7 @@ public object ZeroSettle {
             isDismissed = { dismissals.isDismissed(uid) },
             persistDismissal = { dismissals.dismiss(uid) },
             createWebCheckout = { productId, playToken ->
-                be.createWebCheckout(uid, productId, playToken, customerName, customerEmail, deviceStorefrontCountry())
+                be.createWebCheckout(uid, productId, playToken, customerName, customerEmail, resolveStorefrontCountry())
                     .map { it.checkoutUrl }
             },
             activePlayPurchaseTokenProvider = {

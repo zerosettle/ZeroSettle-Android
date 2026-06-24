@@ -65,6 +65,70 @@ class ZeroSettleWebPurchaseTest {
     }
 
     /**
+     * Storefront snapshot regression: the storefront country is captured ONCE
+     * per identified session at bootstrap (DISPLAY) and reused for the web
+     * checkout (CHARGE). If the device region changes between display and
+     * charge, a geo-targeted pricing experiment could otherwise display one
+     * variant's price and charge another's. This test changes the device locale
+     * BETWEEN identify (snapshots US) and the web checkout, then asserts the
+     * checkout still sends `storefront=US`, NOT the post-change GB value.
+     */
+    @Test fun purchase_chargesWithBootstrapStorefront_notLiveLocaleAtCheckout() = runBlocking<Unit> {
+        var productsStorefront: String? = "ABSENT"
+        var checkoutStorefront: String? = "ABSENT"
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val full = request.path.orEmpty()
+                val path = full.substringBefore('?')
+                return when {
+                    path.startsWith("/v1/iap/products/") -> {
+                        // Storefront rides as a query param on the products fetch.
+                        productsStorefront = full.substringAfter("storefront=", "").substringBefore('&')
+                            .ifEmpty { null }
+                        MockResponse().setBody(
+                            """{"products":[{"id":"pro_monthly","display_name":"Pro","product_description":"",
+                               "type":"auto_renewable_subscription","checkout_route":"web",
+                               "web_price":{"amount_micros":50000000,"currency_code":"USD"}}]}""",
+                        )
+                    }
+                    path.startsWith("/v1/iap/entitlements/") ->
+                        MockResponse().setBody("""{"entitlements":[]}""")
+                    path.startsWith("/v1/iap/checkout-configs/") -> {
+                        // Storefront rides in the POST body on the checkout create.
+                        val body = request.body.readUtf8()
+                        checkoutStorefront = Regex("\"storefront\":\"([^\"]*)\"")
+                            .find(body)?.groupValues?.get(1)
+                        MockResponse().setBody("""{"checkout_url":"https://c/x"}""")
+                    }
+                    path.startsWith("/v1/iap/transactions/") -> MockResponse().setBody(
+                        """{"id":"txn_1","product_id":"pro_monthly","status":"completed","source":"web_checkout","purchased_at":"2026-05-11T00:00:00Z"}""",
+                    )
+                    else -> MockResponse().setResponseCode(404).setBody("unmocked: $path")
+                }
+            }
+        }
+
+        // DISPLAY: device region is US at bootstrap → snapshot US.
+        org.robolectric.RuntimeEnvironment.setQualifiers("en-rUS")
+        ZeroSettle.identify(Identity.User(id = "u1"))
+        assertThat(productsStorefront).isEqualTo("US")
+
+        // Device region flips to GB AFTER display, BEFORE charge.
+        org.robolectric.RuntimeEnvironment.setQualifiers("en-rGB")
+        assertThat(ZeroSettle.deviceStorefrontCountry()).isEqualTo("GB") // live read did change
+
+        // CHARGE: web checkout must use the snapshot (US), not the live GB read.
+        val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val deferredPurchase = scope.async { ZeroSettle.purchase(activity, productId = "pro_monthly") }
+        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        ZeroSettle.completeWebCheckout("zerosettle://checkout/return?status=success&transaction_id=txn_1")
+        withTimeout(5000) { deferredPurchase.await() }
+
+        assertThat(checkoutStorefront).isEqualTo("US")
+    }
+
+    /**
      * checkout_route honoring: when the catalog marks a product's cohort as
      * `"store"`, purchase() must delegate to Play Billing rather than web
      * checkout. Here `syncPlayPurchases = false` (setUp) means the Play
