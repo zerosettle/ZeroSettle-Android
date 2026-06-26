@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.models.CancelFlow
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 fun CancelDebugScreen() {
     val entitlements by ZeroSettle.entitlements.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var config by remember { mutableStateOf<CancelFlow.Config?>(null) }
     var status by remember { mutableStateOf("") }
 
@@ -61,16 +63,15 @@ fun CancelDebugScreen() {
             }
             ZeroSettleCancelFlow(
                 config = cfg,
+                productId = targetProductId ?: "",
                 onResult = { result ->
                     scope.launch {
                         status = when (result) {
                             is CancelFlow.Result.SaveOfferAccepted -> {
-                                // 1.3.0: SaveOfferAccepted.productId is a placeholder (empty string) from the
-                                // composable — the new Offer shape has no product_id. Guard like the pause/cancel
-                                // paths: never call the backend with an empty id (a real 400/garbage request).
+                                // productId now flows directly from ZeroSettleCancelFlow (no empty-string placeholder)
                                 if (targetProductId == null) "no target for save offer" else {
-                                    val r = ZeroSettle.acceptSaveOffer(targetProductId)
-                                    if (r.isSuccess) "save offer accepted → $targetProductId" else "acceptSaveOffer failed: ${r.exceptionOrNull()?.message}"
+                                    val r = ZeroSettle.acceptSaveOffer(result.productId)
+                                    if (r.isSuccess) "save offer accepted → ${result.productId}" else "acceptSaveOffer failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }
                             is CancelFlow.Result.Paused -> {
@@ -87,6 +88,18 @@ fun CancelDebugScreen() {
                                     if (r.isSuccess) "cancelled $targetProductId" else "cancel failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }
+                            is CancelFlow.Result.Downgraded -> {
+                                if (targetProductId == null) "no target for downgrade" else {
+                                    val activity = context as? android.app.Activity
+                                    if (activity != null) {
+                                        ZeroSettle.purchase(activity, result.targetProductId)
+                                        "downgrade initiated → ${result.targetProductId}"
+                                    } else {
+                                        "downgrade: could not get activity"
+                                    }
+                                }
+                            }
+                            CancelFlow.Result.DeflectDismissed -> "deflect dismissed"
                             CancelFlow.Result.Dismissed -> "dismissed cancel flow"
                         }
                         ZeroSettle.restoreEntitlements()

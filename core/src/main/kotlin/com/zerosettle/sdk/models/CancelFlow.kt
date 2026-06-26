@@ -136,13 +136,17 @@ public object CancelFlow {
         @SerialName("variant_id") val variantId: Int? = null,
     )
 
-    // ─── Result (host-facing sealed class; unchanged from 1.2.1) ─────────────
+    // ─── Result (host-facing sealed class) ────────────────────────────────────
 
     public sealed class Result {
         public data object Cancelled : Result()
         public data class Paused(val resumesAt: String?) : Result()
         public data class SaveOfferAccepted(val productId: String) : Result()
         public data object Dismissed : Result()
+        /** User tapped the downgrade CTA — host should call ZeroSettle.purchase(activity, targetProductId). */
+        public data class Downgraded(val targetProductId: String) : Result()
+        /** User dismissed the deflect screen without cancelling (currently unused; reserved for host telemetry). */
+        public data object DeflectDismissed : Result()
     }
 
     // ─── Wire types for Backend.kt calls (unchanged from 1.2.1) ─────────────

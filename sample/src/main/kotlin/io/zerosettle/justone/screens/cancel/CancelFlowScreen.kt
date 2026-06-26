@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.models.CancelFlow
@@ -56,6 +57,7 @@ import kotlin.random.Random
 @Composable
 fun CancelFlowScreen(productId: String, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var config by remember { mutableStateOf<CancelFlow.Config?>(null) }
     var loadFailed by remember { mutableStateOf(false) }
     var showConfetti by remember { mutableStateOf(false) }
@@ -78,11 +80,18 @@ fun CancelFlowScreen(productId: String, onDone: () -> Unit) {
                 onDone()
             }
             is CancelFlow.Result.SaveOfferAccepted -> scope.launch {
-                // 1.3.0: SaveOfferAccepted.productId is an empty placeholder from ZeroSettleCancelFlow
-                // (the new Offer shape has no product_id). Use the screen-level productId param instead.
-                ZeroSettle.acceptSaveOffer(productId)
+                // productId is now passed directly from ZeroSettleCancelFlow (no empty-string placeholder)
+                ZeroSettle.acceptSaveOffer(result.productId)
                 onDone()
             }
+            is CancelFlow.Result.Downgraded -> {
+                val activity = context as? android.app.Activity
+                if (activity != null) {
+                    scope.launch { ZeroSettle.purchase(activity, result.targetProductId) }
+                }
+                onDone()
+            }
+            CancelFlow.Result.DeflectDismissed -> onDone()
             CancelFlow.Result.Dismissed -> onDone()
         }
     }
@@ -143,6 +152,7 @@ fun CancelFlowScreen(productId: String, onDone: () -> Unit) {
 
                 config != null -> ZeroSettleCancelFlow(
                     config = config!!,
+                    productId = productId,
                     onResult = { handleResult(it) },
                 )
             }
