@@ -171,4 +171,17 @@ class CancelFlowDecodeTest {
         assertThat(config.questions).isEmpty()
         assertThat(config.offer).isNull()
     }
+
+    // ── accept-offer response (SaveOfferResult new wire fields) ─────────────────
+
+    @Test fun `SaveOfferResult decodes new wire fields`() {
+        // POST /v1/iap/cancel-flow/accept-offer/ now returns
+        // {message, discount_percent, duration_months} — not the legacy
+        // {product_id, savings_percent}. Guards against silent model drift.
+        val raw = """{"message":"Offer applied","discount_percent":20,"duration_months":3}"""
+        val result = json.decodeFromString(CancelFlow.SaveOfferResult.serializer(), raw)
+        assertThat(result.message).isEqualTo("Offer applied")
+        assertThat(result.discountPercent).isEqualTo(20)
+        assertThat(result.durationMonths).isEqualTo(3)
+    }
 }

@@ -65,10 +65,13 @@ fun CancelDebugScreen() {
                     scope.launch {
                         status = when (result) {
                             is CancelFlow.Result.SaveOfferAccepted -> {
-                                // 1.3.0: SaveOfferAccepted.productId is a placeholder; use targetProductId.
-                                val pid = targetProductId ?: result.productId
-                                val r = ZeroSettle.acceptSaveOffer(pid)
-                                if (r.isSuccess) "save offer accepted → $pid" else "acceptSaveOffer failed: ${r.exceptionOrNull()?.message}"
+                                // 1.3.0: SaveOfferAccepted.productId is a placeholder (empty string) from the
+                                // composable — the new Offer shape has no product_id. Guard like the pause/cancel
+                                // paths: never call the backend with an empty id (a real 400/garbage request).
+                                if (targetProductId == null) "no target for save offer" else {
+                                    val r = ZeroSettle.acceptSaveOffer(targetProductId)
+                                    if (r.isSuccess) "save offer accepted → $targetProductId" else "acceptSaveOffer failed: ${r.exceptionOrNull()?.message}"
+                                }
                             }
                             is CancelFlow.Result.Paused -> {
                                 if (targetProductId == null) "no target to pause" else {

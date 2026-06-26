@@ -73,7 +73,9 @@ public fun ZeroSettleCancelFlow(
                         // param (CancelFlowScreen / CancelDebugScreen) is used at the call
                         // site via onResult → SaveOfferAccepted. We pass an empty string here
                         // as a placeholder; callers that already hold productId should use it.
-                        // Route-driven rework (Task 3.4) will clean this up properly.
+                        // TODO(Task 3.4): drop the placeholder — either give this composable a
+                        // productId param or make SaveOfferAccepted a no-arg result so the empty
+                        // string can never leak into an acceptSaveOffer("") backend call.
                         onClick = { onResult(CancelFlow.Result.SaveOfferAccepted(productId = "")) },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text(offer.ctaText ?: "Keep my plan") }

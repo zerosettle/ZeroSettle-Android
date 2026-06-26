@@ -69,6 +69,8 @@ class ZeroSettleCancelAndUpgradeTest {
         composeRule.waitForIdle()
         // 1.3.0: SaveOfferAccepted.productId is a placeholder (empty string) from ZeroSettleCancelFlow;
         // callers substitute the screen-level productId. We only assert the type here.
+        // TODO(Task 3.4): once the composable carries a real productId (no placeholder),
+        // restore the assertEquals on the resulting productId.
         assertTrue(result is CancelFlow.Result.SaveOfferAccepted)
     }
 

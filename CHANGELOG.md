@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.0 — Cancel-flow model rewrite (decode-break fix) — 2026-06-25
+
+### SDK (`:core`)
+
+- **Fixed the cancel-flow decode break.** The 1.2.x `CancelFlow.Question.options` was
+  `List<String>`, but the backend sends option **objects** — `fetchCancelFlowConfig()`
+  threw `MissingFieldException` against the live response, breaking the flow. Options are
+  now typed `CancelFlow.Option { id, order, label, iconName?, subtitle?, triggersOffer,
+  triggersPause, route? }`.
+- **Cancel-flow model now matches the full server-driven wire shape.** `CancelFlow.Config`
+  gains `offer` (with `duration`/`durationUnit`), `pause` (typed `PauseOption` list),
+  `deflect` (resource items), `downgrade` (target product), and `variantId`. The stale
+  flat `saveOffer` / `pauseOptionsDays` fields are removed. All new fields are
+  nullable-with-defaults, so the current live backend response (no `route`/`deflect`/
+  `downgrade`/`duration_unit`) decodes cleanly too.
+- Sends `X-ZS-SDK-Platform: android` alongside `X-ZS-SDK-Version` on every request
+  (already present; the version header now reports `1.3.0`).
+
+> Note: this release is the foundation chunk — the route-driven cancel-flow UI
+> (deflect/downgrade screens, `option.route` navigation) lands in a follow-up.
+
 ## 1.2.0 — On-screen offer-impression tracking — 2026-06-01
 
 - `Modifier.offerImpression()` — report a ≥50%-on-screen impression once per session for any composable; auto-resolves the active offer via `ZeroSettle.currentOffer`.

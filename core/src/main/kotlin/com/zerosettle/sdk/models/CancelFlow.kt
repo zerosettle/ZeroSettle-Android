@@ -22,6 +22,12 @@ import kotlinx.serialization.Serializable
  */
 public object CancelFlow {
 
+    // TODO(Task 3.4): 1.3.0 always receives the `full` (object-options) shape — the
+    // legacy `legacy_android` (string-options) shape is NOT decoded here. If a stale
+    // cache could ever serve string options to a 1.3.0 client, add a polymorphic
+    // string-OR-object `Option` deserializer. Deferred resilience item (no real
+    // exposure today: the backend gates the wire shape by SDK version+platform).
+
     // ─── Option object ────────────────────────────────────────────────────────
 
     @Serializable

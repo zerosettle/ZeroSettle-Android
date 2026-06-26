@@ -49,6 +49,8 @@ internal class HttpClient(
     private fun Request.Builder.headers(): Request.Builder = apply {
         addHeader("X-ZeroSettle-Key", publishableKey)
         addHeader("X-ZS-SDK-Version", sdkVersion)
+        // Wire name is `X-ZS-SDK-Platform` (backend reads HTTP_X_ZS_SDK_PLATFORM). This
+        // matches the `X-ZS-SDK-Version` convention — do NOT "fix" it to `X-ZS-Platform`.
         addHeader("X-ZS-SDK-Platform", "android")
         addHeader("Accept", "application/json")
     }
