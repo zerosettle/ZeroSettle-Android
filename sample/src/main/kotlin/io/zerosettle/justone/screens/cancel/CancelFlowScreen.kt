@@ -72,11 +72,15 @@ fun CancelFlowScreen(productId: String, onDone: () -> Unit) {
                 showConfetti = true
             }
             is CancelFlow.Result.Paused -> scope.launch {
-                ZeroSettle.pauseSubscription(productId, config?.pauseOptionsDays?.firstOrNull())
+                // 1.3.0: pause options are now typed PauseOption objects on config.pause.options
+                val pauseDays = config?.pause?.options?.firstOrNull()?.durationDays
+                ZeroSettle.pauseSubscription(productId, pauseDays)
                 onDone()
             }
             is CancelFlow.Result.SaveOfferAccepted -> scope.launch {
-                ZeroSettle.acceptSaveOffer(result.productId)
+                // 1.3.0: SaveOfferAccepted.productId is an empty placeholder from ZeroSettleCancelFlow
+                // (the new Offer shape has no product_id). Use the screen-level productId param instead.
+                ZeroSettle.acceptSaveOffer(productId)
                 onDone()
             }
             CancelFlow.Result.Dismissed -> onDone()

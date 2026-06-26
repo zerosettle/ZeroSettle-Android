@@ -19,10 +19,37 @@ import org.robolectric.RobolectricTestRunner
 class ZeroSettleCancelAndUpgradeTest {
     @get:Rule val composeRule = createComposeRule()
 
+    // 1.3.0: options are typed Option objects; offer lives in Config.offer; pause in Config.pause.
     private val cancelConfig = CancelFlow.Config(
-        questions = listOf(CancelFlow.Question(id = "q1", prompt = "Why are you leaving?", options = listOf("Too expensive", "Not using it"))),
-        saveOffer = CancelFlow.SaveOffer(productId = "pro_monthly", savingsPercent = 50, copy = "Stay for 50% off"),
-        pauseOptionsDays = listOf(7, 30),
+        enabled = true,
+        questions = listOf(
+            CancelFlow.Question(
+                id = 1, order = 0, questionText = "Why are you leaving?",
+                questionType = "single_select", isRequired = true,
+                options = listOf(
+                    CancelFlow.Option(id = 1, order = 0, label = "Too expensive", triggersOffer = true, triggersPause = false),
+                    CancelFlow.Option(id = 2, order = 1, label = "Not using it", triggersOffer = false, triggersPause = false),
+                ),
+            ),
+        ),
+        offer = CancelFlow.Offer(
+            enabled = true,
+            title = "Stay for 50% off",
+            body = "Stay for 50% off",
+            ctaText = "Keep my plan",
+            type = "discount",
+            value = "50",
+        ),
+        pause = CancelFlow.Pause(
+            enabled = true,
+            title = "Pause instead?",
+            body = "Pause and come back.",
+            ctaText = "Pause",
+            options = listOf(
+                CancelFlow.PauseOption(id = 1, order = 0, label = "1 week", durationType = "days", durationDays = 7),
+                CancelFlow.PauseOption(id = 2, order = 1, label = "1 month", durationType = "days", durationDays = 30),
+            ),
+        ),
     )
 
     @Test fun cancelFlow_showsQuestion_thenSaveOffer() {
@@ -40,8 +67,9 @@ class ZeroSettleCancelAndUpgradeTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Keep my plan").performClick()
         composeRule.waitForIdle()
+        // 1.3.0: SaveOfferAccepted.productId is a placeholder (empty string) from ZeroSettleCancelFlow;
+        // callers substitute the screen-level productId. We only assert the type here.
         assertTrue(result is CancelFlow.Result.SaveOfferAccepted)
-        assertEquals("pro_monthly", (result as CancelFlow.Result.SaveOfferAccepted).productId)
     }
 
     @Test fun cancelFlow_noQuestions_startsAtSaveOffer() {

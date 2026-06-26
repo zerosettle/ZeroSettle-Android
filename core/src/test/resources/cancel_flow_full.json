@@ -1,0 +1,141 @@
+{
+  "deflect": {
+    "body": "Before you go \u2014 here are some quick resources.",
+    "enabled": true,
+    "items": [
+      {
+        "action_type": "article",
+        "action_value": "https://help.example.com/getting-started",
+        "id": 1,
+        "label": "Read our getting-started guide",
+        "order": 0
+      },
+      {
+        "action_type": "feature",
+        "action_value": "https://feedback.example.com",
+        "id": 2,
+        "label": "Request a feature",
+        "order": 1
+      },
+      {
+        "action_type": "support",
+        "action_value": "mailto:support@example.com",
+        "id": 3,
+        "label": "Talk to support",
+        "order": 2
+      }
+    ],
+    "title": "Let us help first"
+  },
+  "downgrade": {
+    "body": "Keep the essentials for less.",
+    "cta_text": "Switch & save",
+    "enabled": true,
+    "target_product_id": "com.example.basic_monthly",
+    "title": "How about a lighter plan?"
+  },
+  "enabled": true,
+  "offer": {
+    "body": "Get 2 free weeks on us.",
+    "cta_text": "Claim my free weeks",
+    "duration": 2,
+    "duration_unit": "weeks",
+    "enabled": true,
+    "title": "Stay a bit longer?",
+    "type": "free_period",
+    "value": "2"
+  },
+  "pause": {
+    "body": "Pause your subscription and come back when you're ready.",
+    "cta_text": "Pause Subscription",
+    "enabled": true,
+    "options": [
+      {
+        "duration_days": 30,
+        "duration_type": "days",
+        "id": 1,
+        "label": "Pause for 1 month",
+        "order": 0,
+        "resume_date": null
+      },
+      {
+        "duration_days": 90,
+        "duration_type": "days",
+        "id": 2,
+        "label": "Pause for 3 months",
+        "order": 1,
+        "resume_date": null
+      }
+    ],
+    "title": "Need a break?"
+  },
+  "questions": [
+    {
+      "id": 1,
+      "is_required": true,
+      "options": [
+        {
+          "icon_name": "dollarsign.circle",
+          "id": 1,
+          "label": "Too expensive",
+          "order": 0,
+          "route": "offer",
+          "subtitle": "The price is too high",
+          "triggers_offer": true,
+          "triggers_pause": false
+        },
+        {
+          "icon_name": null,
+          "id": 2,
+          "label": "Need to pause",
+          "order": 1,
+          "route": "pause",
+          "subtitle": null,
+          "triggers_offer": false,
+          "triggers_pause": true
+        },
+        {
+          "icon_name": null,
+          "id": 3,
+          "label": "Need help instead",
+          "order": 2,
+          "route": "deflect",
+          "subtitle": null,
+          "triggers_offer": false,
+          "triggers_pause": false
+        },
+        {
+          "icon_name": null,
+          "id": 4,
+          "label": "Want a cheaper plan",
+          "order": 3,
+          "route": "downgrade",
+          "subtitle": null,
+          "triggers_offer": false,
+          "triggers_pause": false
+        },
+        {
+          "icon_name": null,
+          "id": 5,
+          "label": "Moving on",
+          "order": 4,
+          "route": "none",
+          "subtitle": null,
+          "triggers_offer": false,
+          "triggers_pause": false
+        }
+      ],
+      "order": 0,
+      "question_text": "Why are you canceling?",
+      "question_type": "single_select"
+    },
+    {
+      "id": 2,
+      "is_required": false,
+      "options": [],
+      "order": 1,
+      "question_text": "Anything else to share?",
+      "question_type": "free_text"
+    }
+  ]
+}

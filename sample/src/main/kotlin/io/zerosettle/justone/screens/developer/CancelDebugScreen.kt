@@ -56,7 +56,7 @@ fun CancelDebugScreen() {
         config?.let { cfg ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("config: questions=${cfg.questions.size}  saveOffer=${cfg.saveOffer?.productId ?: "—"} (${cfg.saveOffer?.savingsPercent ?: 0}%)  pauseDays=${cfg.pauseOptionsDays}")
+                    Text("config: questions=${cfg.questions.size}  offer=${cfg.offer?.type ?: "—"} (${cfg.offer?.value ?: "0"})  pauseOptions=${cfg.pause?.options?.size ?: 0}")
                 }
             }
             ZeroSettleCancelFlow(
@@ -65,12 +65,16 @@ fun CancelDebugScreen() {
                     scope.launch {
                         status = when (result) {
                             is CancelFlow.Result.SaveOfferAccepted -> {
-                                val r = ZeroSettle.acceptSaveOffer(result.productId)
-                                if (r.isSuccess) "save offer accepted → ${r.getOrNull()?.productId}" else "acceptSaveOffer failed: ${r.exceptionOrNull()?.message}"
+                                // 1.3.0: SaveOfferAccepted.productId is a placeholder; use targetProductId.
+                                val pid = targetProductId ?: result.productId
+                                val r = ZeroSettle.acceptSaveOffer(pid)
+                                if (r.isSuccess) "save offer accepted → $pid" else "acceptSaveOffer failed: ${r.exceptionOrNull()?.message}"
                             }
                             is CancelFlow.Result.Paused -> {
                                 if (targetProductId == null) "no target to pause" else {
-                                    val r = ZeroSettle.pauseSubscription(targetProductId, cfg.pauseOptionsDays.firstOrNull())
+                                    // 1.3.0: pause duration from typed PauseOption objects
+                                    val pauseDays = cfg.pause?.options?.firstOrNull()?.durationDays
+                                    val r = ZeroSettle.pauseSubscription(targetProductId, pauseDays)
                                     if (r.isSuccess) "paused (resumes ${r.getOrNull() ?: "?"})" else "pause failed: ${r.exceptionOrNull()?.message}"
                                 }
                             }

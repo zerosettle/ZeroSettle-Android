@@ -180,14 +180,27 @@ class ModelSerializationTest {
     }
 
     @Test fun cancelFlow_config_decodes() {
+        // 1.3.0: options are now typed objects; pause durations are in pause.options[].duration_days
         val fixture = """
-        {"questions":[{"id":"q1","prompt":"Why?","options":["price","other"]}],
-         "save_offer":{"product_id":"pro_monthly","savings_percent":50,"copy":"Save 50%"},
-         "pause_options_days":[7,14,30]}
+        {"enabled":true,"questions":[{
+          "id":1,"order":0,"question_text":"Why?","question_type":"single_select","is_required":true,
+          "options":[
+            {"id":1,"order":0,"label":"Too expensive","icon_name":null,"subtitle":null,"triggers_offer":true,"triggers_pause":false},
+            {"id":2,"order":1,"label":"Other","icon_name":null,"subtitle":null,"triggers_offer":false,"triggers_pause":false}
+          ]
+        }],
+        "offer":{"enabled":true,"title":"Stay?","body":"Here is a deal.","cta_text":"Claim","type":"discount","value":"20"},
+        "pause":{"enabled":true,"title":"Break?","body":"Pause.","cta_text":"Pause","options":[
+          {"id":1,"order":0,"label":"1 month","duration_type":"days","duration_days":7},
+          {"id":2,"order":1,"label":"3 months","duration_type":"days","duration_days":14},
+          {"id":3,"order":2,"label":"6 months","duration_type":"days","duration_days":30}
+        ]}}
         """.trimIndent()
         val cfg = json.decodeFromString(CancelFlow.Config.serializer(), fixture)
         assertThat(cfg.questions).hasSize(1)
-        assertThat(cfg.pauseOptionsDays).containsExactly(7, 14, 30).inOrder()
+        assertThat(cfg.questions[0].options).hasSize(2)
+        assertThat(cfg.questions[0].options[0].label).isEqualTo("Too expensive")
+        assertThat(cfg.pause?.options?.map { it.durationDays }).containsExactly(7, 14, 30).inOrder()
     }
 
 }

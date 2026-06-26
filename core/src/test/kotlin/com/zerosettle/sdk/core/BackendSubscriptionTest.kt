@@ -42,9 +42,20 @@ class BackendSubscriptionTest {
     }
 
     @Test fun fetchCancelFlowConfig_decodes() = runTest {
-        server.enqueue(MockResponse().setBody("""{"questions":[],"pause_options_days":[7,30]}"""))
+        // 1.3.0: options are objects, pause durations live in pause.options[].duration_days
+        server.enqueue(MockResponse().setBody("""
+            {"enabled":true,"questions":[],"pause":{
+              "enabled":true,"title":"Need a break?","body":"Pause.","cta_text":"Pause",
+              "options":[
+                {"id":1,"order":0,"label":"1 month","duration_type":"days","duration_days":7},
+                {"id":2,"order":1,"label":"3 months","duration_type":"days","duration_days":30}
+              ]
+            }}
+        """.trimIndent()))
         val res = backend.fetchCancelFlowConfig(userId = "u1")
-        assertThat(res.getOrNull()?.pauseOptionsDays).containsExactly(7, 30).inOrder()
+        val cfg = res.getOrNull()
+        assertThat(cfg).isNotNull()
+        assertThat(cfg!!.pause?.options?.map { it.durationDays }).containsExactly(7, 30).inOrder()
         assertThat(server.takeRequest().path).contains("/v1/iap/cancel-flow/")
     }
 
