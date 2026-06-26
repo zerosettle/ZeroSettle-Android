@@ -78,6 +78,66 @@ class ZeroSettleCancelAndUpgradeTest {
         composeRule.onNodeWithText("Stay for 50% off").assertIsDisplayed()
     }
 
+    // ─── Deflect / downgrade screen interaction tests ─────────────────────────
+
+    // A single-question config whose options route to deflect / downgrade.
+    private val deflectDowngradeConfig = CancelFlow.Config(
+        enabled = true,
+        questions = listOf(
+            CancelFlow.Question(
+                id = 1, order = 0, questionText = "Why are you leaving?",
+                questionType = "single_select", isRequired = true,
+                options = listOf(
+                    CancelFlow.Option(id = 1, order = 0, label = "Need help instead", route = "deflect"),
+                    CancelFlow.Option(id = 2, order = 1, label = "Want a cheaper plan", route = "downgrade"),
+                ),
+            ),
+        ),
+        deflect = CancelFlow.Deflect(
+            enabled = true, title = "Let us help first", body = "Here are some resources.",
+            items = listOf(
+                CancelFlow.DeflectItem(id = 1, order = 0, label = "Read the guide", actionType = "article", actionValue = "https://help.example.com"),
+            ),
+        ),
+        downgrade = CancelFlow.Downgrade(
+            enabled = true, title = "How about a lighter plan?", body = "Keep the essentials for less.",
+            ctaText = "Switch & save", targetProductId = "com.example.basic_monthly",
+        ),
+    )
+
+    @Test fun cancelFlow_deflectContinueCancelling_resultIsCancelled() {
+        var result: CancelFlow.Result? = null
+        composeRule.setContent { MaterialTheme { ZeroSettleTheme { ZeroSettleCancelFlow(config = deflectDowngradeConfig, productId = "test_product", onResult = { result = it }) } } }
+        composeRule.onNodeWithText("Need help instead").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Let us help first").assertIsDisplayed()
+        composeRule.onNodeWithText("Continue cancelling").performClick()
+        composeRule.waitForIdle()
+        assertTrue(result is CancelFlow.Result.Cancelled)
+    }
+
+    @Test fun cancelFlow_downgradeCta_resultIsDowngradedWithTargetId() {
+        var result: CancelFlow.Result? = null
+        composeRule.setContent { MaterialTheme { ZeroSettleTheme { ZeroSettleCancelFlow(config = deflectDowngradeConfig, productId = "test_product", onResult = { result = it }) } } }
+        composeRule.onNodeWithText("Want a cheaper plan").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("How about a lighter plan?").assertIsDisplayed()
+        composeRule.onNodeWithText("Switch & save").performClick()
+        composeRule.waitForIdle()
+        assertTrue(result is CancelFlow.Result.Downgraded)
+        assertEquals("com.example.basic_monthly", (result as CancelFlow.Result.Downgraded).targetProductId)
+    }
+
+    @Test fun cancelFlow_downgradeNoThanks_resultIsCancelled() {
+        var result: CancelFlow.Result? = null
+        composeRule.setContent { MaterialTheme { ZeroSettleTheme { ZeroSettleCancelFlow(config = deflectDowngradeConfig, productId = "test_product", onResult = { result = it }) } } }
+        composeRule.onNodeWithText("Want a cheaper plan").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("No thanks, cancel").performClick()
+        composeRule.waitForIdle()
+        assertTrue(result is CancelFlow.Result.Cancelled)
+    }
+
     @Test fun upgradeOffer_acceptCallsResultAccepted() {
         val cfg = UpgradeOffer.Config(
             available = true, savingsPercent = 20,

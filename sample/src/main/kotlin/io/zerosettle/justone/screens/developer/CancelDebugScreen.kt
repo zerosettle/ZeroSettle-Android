@@ -23,9 +23,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.util.Log
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.models.CancelFlow
 import com.zerosettle.ui.ZeroSettleCancelFlow
+import com.zerosettle.ui.findActivity
 import kotlinx.coroutines.launch
 
 /** Developer tool: server-driven retention / cancel flow test harness — mirrors JustOne's CancelFlowView. */
@@ -89,17 +91,15 @@ fun CancelDebugScreen() {
                                 }
                             }
                             is CancelFlow.Result.Downgraded -> {
-                                if (targetProductId == null) "no target for downgrade" else {
-                                    val activity = context as? android.app.Activity
-                                    if (activity != null) {
-                                        ZeroSettle.purchase(activity, result.targetProductId)
-                                        "downgrade initiated → ${result.targetProductId}"
-                                    } else {
-                                        "downgrade: could not get activity"
-                                    }
+                                val activity = context.findActivity()
+                                if (activity == null) {
+                                    Log.e("CancelDebugScreen", "Downgrade: no host Activity in Context chain; purchase skipped")
+                                    "downgrade: no host Activity found"
+                                } else {
+                                    ZeroSettle.purchase(activity, result.targetProductId)
+                                    "downgrade initiated → ${result.targetProductId}"
                                 }
                             }
-                            CancelFlow.Result.DeflectDismissed -> "deflect dismissed"
                             CancelFlow.Result.Dismissed -> "dismissed cancel flow"
                         }
                         ZeroSettle.restoreEntitlements()

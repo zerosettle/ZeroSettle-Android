@@ -145,8 +145,6 @@ public object CancelFlow {
         public data object Dismissed : Result()
         /** User tapped the downgrade CTA — host should call ZeroSettle.purchase(activity, targetProductId). */
         public data class Downgraded(val targetProductId: String) : Result()
-        /** User dismissed the deflect screen without cancelling (currently unused; reserved for host telemetry). */
-        public data object DeflectDismissed : Result()
     }
 
     // ─── Wire types for Backend.kt calls (unchanged from 1.2.1) ─────────────

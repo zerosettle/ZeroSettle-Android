@@ -78,10 +78,9 @@ private enum class CancelStep { QUESTION, OFFER, PAUSE, DEFLECT, DOWNGRADE }
  * determines which screen follows (`"offer"`, `"pause"`, `"deflect"`, `"downgrade"`,
  * `"none"`). When `route` is null the legacy triggers-boolean fallback applies.
  *
- * New results in 1.4.0: [CancelFlow.Result.Downgraded] (CTA tapped — host should call
- * `ZeroSettle.purchase(activity, targetProductId)`) and [CancelFlow.Result.DeflectDismissed]
- * (reserved for host telemetry; not currently emitted by the deflect screen — "Continue
- * cancelling" emits [CancelFlow.Result.Cancelled] instead).
+ * New result in 1.3.0: [CancelFlow.Result.Downgraded] (CTA tapped — host should call
+ * `ZeroSettle.purchase(activity, targetProductId)`). The deflect screen's "Continue
+ * cancelling" escape emits [CancelFlow.Result.Cancelled].
  */
 @Composable
 public fun ZeroSettleCancelFlow(

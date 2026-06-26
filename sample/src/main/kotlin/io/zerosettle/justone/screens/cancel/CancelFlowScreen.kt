@@ -37,9 +37,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.util.Log
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.models.CancelFlow
 import com.zerosettle.ui.ZeroSettleCancelFlow
+import com.zerosettle.ui.findActivity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -85,13 +87,14 @@ fun CancelFlowScreen(productId: String, onDone: () -> Unit) {
                 onDone()
             }
             is CancelFlow.Result.Downgraded -> {
-                val activity = context as? android.app.Activity
+                val activity = context.findActivity()
                 if (activity != null) {
                     scope.launch { ZeroSettle.purchase(activity, result.targetProductId) }
+                } else {
+                    Log.e("CancelFlowScreen", "Downgrade: no host Activity in Context chain; purchase skipped")
                 }
                 onDone()
             }
-            CancelFlow.Result.DeflectDismissed -> onDone()
             CancelFlow.Result.Dismissed -> onDone()
         }
     }
