@@ -58,7 +58,10 @@ public data class Currency(
     val name: String,
     val plural: String,
     val glyph: String? = null,
-    /** "allow" or "stop": what to do when ZeroSettle can't be reached. */
+    /**
+     * "allow" or "stop": what to do when ZeroSettle can't be reached. A missing value reads as
+     * "allow" on purpose: that is the spec's default, so this fails open like the backend does.
+     */
     val offline: String = "allow",
 )
 
@@ -66,13 +69,13 @@ public data class Currency(
 @Serializable
 public data class Balance(
     val currency: Currency,
-    val remaining: Int,
-    val limit: Int? = null,
+    val remaining: Long,
+    val limit: Long? = null,
     /** ISO 8601 UTC string, kept as text like [Entitlement] dates. */
     @SerialName("resets_at") val resetsAt: String? = null,
-    @SerialName("allowance_remaining") val allowanceRemaining: Int = 0,
-    @SerialName("rolled_over") val rolledOver: Int = 0,
-    val purchased: Int = 0,
+    @SerialName("allowance_remaining") val allowanceRemaining: Long = 0,
+    @SerialName("rolled_over") val rolledOver: Long = 0,
+    val purchased: Long = 0,
 )
 
 /**

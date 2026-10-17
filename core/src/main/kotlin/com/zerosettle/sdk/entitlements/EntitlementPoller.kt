@@ -3,6 +3,7 @@ package com.zerosettle.sdk.entitlements
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.zerosettle.sdk.access.AccessStore
 import com.zerosettle.sdk.core.Backend
 import com.zerosettle.sdk.models.Access
 import com.zerosettle.sdk.models.Entitlement
@@ -32,7 +33,10 @@ internal class EntitlementPoller(
     private val onEntitlements: (List<Entitlement>) -> Unit,
     private val onPendingActions: (List<PendingAction>) -> Unit,
     private val onUnknownActionType: (String) -> Unit,
-    private val onAccess: (userId: String, access: Access) -> Unit = { _, _ -> },
+    // The store the host holds when a poll starts; handed back with the result so a reconfigure
+    // mid-request cannot land one environment's access in another's slot.
+    private val accessStoreProvider: () -> AccessStore? = { null },
+    private val onAccess: (userId: String, access: Access, store: AccessStore?) -> Unit = { _, _, _ -> },
 ) {
     @Volatile private var scope: CoroutineScope? = null
     @Volatile private var periodicJob: Job? = null
@@ -58,6 +62,9 @@ internal class EntitlementPoller(
         ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
     }
 
+    /** True between [start] and [stop]. Visible for testing. */
+    val isStarted: Boolean get() = scope != null
+
     fun stop() {
         runCatching { ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver) }
         periodicJob?.cancel(); periodicJob = null
@@ -81,9 +88,10 @@ internal class EntitlementPoller(
     /** One poll cycle. Visible for testing. Silently no-ops without an identified user or on backend failure. */
     suspend fun pollOnce() {
         val uid = userIdProvider() ?: return
+        val store = accessStoreProvider()
         val resp = backend.fetchEntitlements(uid).getOrNull() ?: return
         onEntitlements(resp.entitlements)
-        onAccess(uid, resp.access())
+        onAccess(uid, resp.access(), store)
         onPendingActions(PendingActionParser.parse(resp.pendingActions, onUnknownActionType))
     }
 

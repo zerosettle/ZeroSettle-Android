@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 fun EntitlementsScreen() {
     val ents by ZeroSettle.entitlements.collectAsState()
     val claims by ZeroSettle.pendingClaims.collectAsState()
+    val access by ZeroSettle.access.collectAsState()
     val plan by ZeroSettle.plan.collectAsState()
     val addOns by ZeroSettle.addOns.collectAsState()
     val features by ZeroSettle.features.collectAsState()
@@ -55,7 +56,7 @@ fun EntitlementsScreen() {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text("Plan", style = MaterialTheme.typography.titleMedium)
-                        Text(plan?.name ?: "No plan")
+                        Text(if (!access.isPresent) "Not loaded" else plan?.name ?: "No plan")
                         if (addOns.isNotEmpty()) Text("Add-ons: ${addOns.joinToString { it.name }}")
                     }
                 }
@@ -83,7 +84,7 @@ fun EntitlementsScreen() {
                             balances.values.forEach { b ->
                                 val of = b.limit?.let { " of $it" } ?: ""
                                 val reset = b.resetsAt?.let { ", resets $it" } ?: ""
-                                Text("${b.currency.name}: ${b.remaining}$of left$reset")
+                                Text("${b.currency.plural}: ${b.remaining}$of left$reset")
                             }
                         }
                     }

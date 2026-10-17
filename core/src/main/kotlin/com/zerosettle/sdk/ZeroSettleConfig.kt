@@ -41,6 +41,41 @@ public data class ZeroSettleConfig(
     val logger: ZeroSettleLogger = LogcatLogger,
     val offlineFeatureDefaults: Map<String, FeatureValue> = emptyMap(),
 ) {
+    /**
+     * The 1.3.0 constructor, kept so code compiled against 1.3.0 keeps linking
+     * (the defaulted-parameter variant included). Hidden from source.
+     */
+    @Deprecated("Binary compatibility with 1.3.0", level = DeprecationLevel.HIDDEN)
+    public constructor(
+        publishableKey: String,
+        playLicenseKey: String? = null,
+        syncPlayPurchases: Boolean = true,
+        preloadCheckout: Boolean = false,
+        strictAck: Boolean = false,
+        baseUrlOverride: String? = null,
+        logger: ZeroSettleLogger = LogcatLogger,
+    ) : this(
+        publishableKey, playLicenseKey, syncPlayPurchases, preloadCheckout, strictAck,
+        baseUrlOverride, logger, emptyMap(),
+    )
+
+    /** The 1.3.0 `copy`, kept for binary compatibility. Hidden from source. */
+    @Deprecated("Binary compatibility with 1.3.0", level = DeprecationLevel.HIDDEN)
+    public fun copy(
+        publishableKey: String = this.publishableKey,
+        playLicenseKey: String? = this.playLicenseKey,
+        syncPlayPurchases: Boolean = this.syncPlayPurchases,
+        preloadCheckout: Boolean = this.preloadCheckout,
+        strictAck: Boolean = this.strictAck,
+        baseUrlOverride: String? = this.baseUrlOverride,
+        logger: ZeroSettleLogger = this.logger,
+    ): ZeroSettleConfig = copy(
+        publishableKey = publishableKey, playLicenseKey = playLicenseKey,
+        syncPlayPurchases = syncPlayPurchases, preloadCheckout = preloadCheckout,
+        strictAck = strictAck, baseUrlOverride = baseUrlOverride, logger = logger,
+        offlineFeatureDefaults = this.offlineFeatureDefaults,
+    )
+
     init {
         require(publishableKey.startsWith(LIVE_PREFIX) || publishableKey.startsWith(TEST_PREFIX)) {
             "ZeroSettleConfig.publishableKey must start with $LIVE_PREFIX or $TEST_PREFIX"

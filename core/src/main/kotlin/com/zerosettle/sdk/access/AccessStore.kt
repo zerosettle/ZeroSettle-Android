@@ -20,18 +20,23 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * On-device copy of the last present [Access], one entry per environment and user,
- * so features work before the first network read and while offline.
+ * On-device copy of the last present [Access], one entry per environment, publishable key
+ * and user, so features work before the first network read and while offline. Two tenants
+ * on one device never share an entry.
  *
  * The entry is stored in the same shape the backend sends, so reading it back reuses
  * the tolerant decoder. The user id is hashed; it never appears in the key.
  */
-internal class AccessStore(private val context: Context, private val environment: String) {
+internal data class AccessStore(
+    private val context: Context,
+    private val environment: String,
+    private val keyHash: String,
+) {
 
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     private fun key(userId: String) =
-        stringPreferencesKey("access.v1.$environment.${hashPrefix(userId)}")
+        stringPreferencesKey("access.v1.$environment.$keyHash.${hashPrefix(userId)}")
 
     suspend fun load(userId: String): Access? {
         val raw = context.accessDataStore.data.first()[key(userId)] ?: return null
@@ -66,7 +71,14 @@ internal class AccessStore(private val context: Context, private val environment
         context.accessDataStore.edit { it.remove(key(userId)) }
     }
 
-    private fun hashPrefix(userId: String): String =
-        MessageDigest.getInstance("SHA-256").digest(userId.toByteArray())
-            .joinToString("") { "%02x".format(it) }.take(16)
+    private fun hashPrefix(userId: String): String = sha256Hex(userId).take(16)
+
+    companion object {
+        /** First 8 hex characters of SHA-256 of the publishable key. */
+        fun keyHash(publishableKey: String): String = sha256Hex(publishableKey).take(8)
+
+        private fun sha256Hex(text: String): String =
+            MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+    }
 }

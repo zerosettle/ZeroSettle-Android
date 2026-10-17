@@ -691,6 +691,7 @@ internal data class EntitlementsResponse(
             features = featureMap,
             balances = balanceMap,
             // Presence follows the decoded shape, so a wrong-typed key never wipes a cached Access.
+            // Deliberate cross-SDK rule (contract section 3); iOS is being aligned to it.
             isPresent = plan is JsonObject || addOns is JsonArray ||
                 features is JsonObject || balances is JsonObject,
         )

@@ -38,11 +38,11 @@ class AccessStateTest {
         ZeroSettle.resetForTesting()
     }
 
-    private fun configure(defaults: Map<String, FeatureValue> = emptyMap()) {
+    private fun configure(defaults: Map<String, FeatureValue> = emptyMap(), key: String = KEY) {
         ZeroSettle.configure(
             context,
             ZeroSettleConfig(
-                publishableKey = "zs_pk_test_abc",
+                publishableKey = key,
                 baseUrlOverride = server.url("/").toString().trimEnd('/'),
                 syncPlayPurchases = false,
                 offlineFeatureDefaults = defaults,
@@ -61,7 +61,7 @@ class AccessStateTest {
         ZeroSettle.identify(Identity.User(id = userId))
     }
 
-    private fun store() = AccessStore(context, "test")
+    private fun store(key: String = KEY) = AccessStore(context, "test", AccessStore.keyHash(key))
 
     private fun awaitUntil(check: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000
@@ -204,5 +204,52 @@ class AccessStateTest {
         assertThat(ZeroSettle.access.value).isEqualTo(Access.EMPTY)
         switching.await()
         assertThat(ZeroSettle.hasAccess("prev_only")).isFalse()
+    }
+
+    @Test fun failedBootstrapOfflineStillRefreshesWhenNetworkReturns() = runTest {
+        store().save("u-cold", Access(
+            Plan("pro", "Pro", PlanKind.TIER), emptyList(),
+            mapOf("old_feature" to FeatureValue.Bool(true)), emptyMap(), true,
+        ))
+        // Cold launch offline: the products fetch fails, bootstrap returns early.
+        // A 4xx, because the client retries a 5xx once.
+        server.enqueue(MockResponse().setResponseCode(403))
+        val result = ZeroSettle.identify(Identity.User(id = "u-cold"))
+        assertThat(result.isFailure).isTrue()
+        assertThat(ZeroSettle.hasAccess("old_feature")).isTrue()
+        // The poller is running anyway; the network returns and one poll replaces the cached access.
+        val poller = ZeroSettle.entitlementPoller!!
+        assertThat(poller.isStarted).isTrue()
+        server.enqueue(MockResponse().setBody(accessBody(features = """{"new_feature":true}""")))
+        poller.pollOnce()
+        assertThat(ZeroSettle.hasAccess("new_feature")).isTrue()
+        assertThat(ZeroSettle.hasAccess("old_feature")).isFalse()
+    }
+
+    @Test fun tenantsAndEnvironmentsNeverShareAnEntry() = runTest {
+        val access = Access(null, emptyList(), mapOf("a" to FeatureValue.Bool(true)), emptyMap(), true)
+        store(KEY).save("u-t", access)
+        assertThat(store(KEY).load("u-t")).isNotNull()
+        assertThat(store("zs_pk_test_other").load("u-t")).isNull()
+        assertThat(AccessStore(context, "live", AccessStore.keyHash(KEY)).load("u-t")).isNull()
+        assertThat(AccessStore.keyHash(KEY)).hasLength(8)
+    }
+
+    @Test fun reconfigureMidRequestSavesNothingUnderTheNewConfig() = runTest {
+        identify("u-re", accessBody(features = """{"a_only":true}"""))
+        awaitUntil { runBlocking { store().load("u-re") } != null }
+        server.enqueue(delayedEntitlements("""{"late":true}"""))
+        val stale = async(Dispatchers.IO) { ZeroSettle.restoreEntitlements() }
+        awaitRequests(4)
+        configure(key = "zs_pk_test_other")
+        stale.await()
+        Thread.sleep(300)
+        assertThat(store().load("u-re")?.features?.keys).containsExactly("a_only")
+        assertThat(store("zs_pk_test_other").load("u-re")).isNull()
+        assertThat(ZeroSettle.hasAccess("late")).isFalse()
+    }
+
+    private companion object {
+        const val KEY = "zs_pk_test_abc"
     }
 }

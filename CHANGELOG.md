@@ -11,6 +11,15 @@
   `ZeroSettleConfig.offlineFeatureDefaults` (default empty) applies only until the first access loads.
 - Additive only: the new fields decode tolerantly and an older backend leaves held access untouched. There
   is no new event type; observe changes through the `access` StateFlow.
+- Binary compatible with 1.3.0: the 7-parameter `ZeroSettleConfig` constructor (with its defaulted variant) and
+  `copy` are kept as hidden members, so code compiled against 1.3.0 links without a rebuild. Java source
+  callers must pass the new `offlineFeatureDefaults` parameter, because a hidden member is not visible to
+  javac; nothing in this repo or its docs uses Java.
+- The cache entry is keyed by environment, publishable key and user, so tenants on one device never share
+  access. Balance amounts are `Long`.
+- After a launch with no network, the access poller still starts, so the cached access refreshes when the
+  network returns (on the next foreground or within 5 minutes). Hosts should still retry `identify` after a
+  failure.
 
 ## 1.3.0 — Cancel-flow model rewrite (decode-break fix) — 2026-06-25
 

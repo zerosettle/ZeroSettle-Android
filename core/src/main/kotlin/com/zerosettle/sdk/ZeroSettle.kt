@@ -1,6 +1,8 @@
 package com.zerosettle.sdk
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import com.zerosettle.sdk.billing.ExternalContentLinkClient
 import com.zerosettle.sdk.core.AppAccountToken
 import com.zerosettle.sdk.core.Backend
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -179,7 +182,8 @@ public object ZeroSettle {
                 _entitlements.value = ents
                 _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = ents.size))
             },
-            onAccess = { uid, access -> setAccess(uid, access) },
+            accessStoreProvider = { accessStore() },
+            onAccess = { uid, access, store -> setAccess(uid, access, store) },
             onPendingActions = { actions -> publishPendingActionsWithEvents(actions) },
             onUnknownActionType = { config?.logger?.info("pending_actions", it) },
         )
@@ -381,13 +385,23 @@ public object ZeroSettle {
         // region change between display and checkout can't diverge the
         // geo-targeted experiment variant. See [sessionStorefrontCountry].
         sessionStorefrontCountry = deviceStorefrontCountry()
-        loadCachedAccess(userId)
-        val products = be.fetchProducts(userId, resolveStorefrontCountry()).getOrElse { return Result.failure(it) }
-        val entResp = be.fetchEntitlements(userId).getOrElse { return Result.failure(it) }
+        // Environment and tenant are fixed now, whatever configure does while the requests run.
+        val store = accessStore()
+        loadCachedAccess(userId, store)
+        // A failed bootstrap (cold launch offline) still starts the poller, so the cached access
+        // refreshes on the next foreground or 5-minute tick once the network is back.
+        val products = be.fetchProducts(userId, resolveStorefrontCountry()).getOrElse {
+            startPollerAfterFailure(userId)
+            return Result.failure(it)
+        }
+        val entResp = be.fetchEntitlements(userId).getOrElse {
+            startPollerAfterFailure(userId)
+            return Result.failure(it)
+        }
         _products.value = products.products
         _entitlements.value = entResp.entitlements
         _pendingClaims.value = entResp.pendingClaims
-        setAccess(userId, entResp.access())
+        setAccess(userId, entResp.access(), store)
         publishPendingActionsWithEvents(parsePendingActions(entResp.pendingActions))
         _isBootstrapped.value = true
         _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = entResp.entitlements.size))
@@ -426,6 +440,15 @@ public object ZeroSettle {
         playCoordinator?.start()
         entitlementPoller?.start(scope.scope)
         return Result.success(products)
+    }
+
+    // ProcessLifecycleOwner observers must be added on the main thread, and identify may run elsewhere.
+    private fun startPollerAfterFailure(userId: String) {
+        if (_currentUserId.value != userId) return
+        val poller = entitlementPoller ?: return
+        val start = { if (_currentUserId.value == userId) poller.start(scope.scope) }
+        if (Looper.myLooper() == Looper.getMainLooper()) start()
+        else Handler(Looper.getMainLooper()).post { start() }
     }
 
     /**
@@ -476,10 +499,6 @@ public object ZeroSettle {
         // returns, against these snapshotted references.
         val oldCoordinator = playCoordinator
         val oldIdentityStore = identityStore
-        // Null the user first: any refresh still in flight then fails the uid check in
-        // setAccess and cannot repopulate access or recreate the stored entry.
-        val loggedOutUserId = switchCurrentUser(null)
-        if (loggedOutUserId != null) removeStoredAccess(loggedOutUserId)
         entitlementPoller?.stop()
         // Clear the pending Play sync queue SYNCHRONOUSLY (not via ioScope)
         // before we relinquish the coordinator reference. The queue is keyed
@@ -491,6 +510,11 @@ public object ZeroSettle {
         oldCoordinator?.let { coord -> runBlocking { coord.queue.clear() } }
         playCoordinator = null
         scope.reset()
+        // Null the user only after teardown, so a collector reacting to the null and calling
+        // identify cannot have its new session wiped. A refresh result arriving before this
+        // point is cleared here, and its save is followed by the removal on the same queue.
+        val loggedOutUserId = switchCurrentUser(null)
+        if (loggedOutUserId != null) removeStoredAccess(loggedOutUserId)
         customerName = null
         customerEmail = null
         sessionStorefrontCountry = null
@@ -547,7 +571,10 @@ public object ZeroSettle {
 
     private val _access = MutableStateFlow(Access.EMPTY)
 
-    /** What the identified user can do: plan, add-ons, feature values and balances. */
+    /**
+     * What the identified user can do: plan, add-ons, feature values and balances. Empty until
+     * [identify] loads the on-device copy or the first network read.
+     */
     public val access: StateFlow<Access> = _access.asStateFlow()
 
     private val _plan = MutableStateFlow<Plan?>(null)
@@ -585,28 +612,35 @@ public object ZeroSettle {
     @Volatile private var accessLoaded = false
     private val accessLock = Any()
 
-    // One thread, so a save queued before a removal can never land after it.
-    private val accessWriteScope: CoroutineScope =
-        CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    // One thread, and each save or removal reaches DataStore.edit before it first suspends, so a
+    // save queued before a removal lands before it. The cache load runs on this dispatcher too.
+    private val accessDispatcher = Dispatchers.IO.limitedParallelism(1)
+    private val accessWriteScope: CoroutineScope = CoroutineScope(SupervisorJob() + accessDispatcher)
 
     private fun accessStore(): AccessStore? {
         val ctx = appContext ?: return null
         val cfg = config ?: return null
-        return AccessStore(ctx, if (cfg.isSandbox) "test" else "live")
+        return AccessStore(ctx, if (cfg.isSandbox) "test" else "live", AccessStore.keyHash(cfg.publishableKey))
     }
 
     private fun featureOrDefault(key: String): FeatureValue? =
         _access.value.features[key]
             ?: if (accessLoaded) null else config?.offlineFeatureDefaults?.get(key)
 
-    /** True for a switch that is on or a non-empty text value. */
+    /**
+     * True for a switch that is on or a non-empty text value. A key absent from loaded access is
+     * false. Before any access has loaded, [ZeroSettleConfig.offlineFeatureDefaults] applies.
+     */
     public fun hasAccess(key: String): Boolean = when (val v = featureOrDefault(key)) {
         is FeatureValue.Bool -> v.value
         is FeatureValue.Text -> v.value.isNotEmpty()
         null -> false
     }
 
-    /** The text value of a feature, or null for a switch or an unknown key. */
+    /**
+     * The text value of a feature, or null for a switch or an unknown key. Before any access has
+     * loaded, [ZeroSettleConfig.offlineFeatureDefaults] applies.
+     */
     public fun value(key: String): String? = (featureOrDefault(key) as? FeatureValue.Text)?.value
 
     /** The user's balance in the currency, or null. */
@@ -624,35 +658,37 @@ public object ZeroSettle {
         previous
     }
 
-    // The single write path. [uid] is the user the request was made for; a result for anyone
-    // else (a stale response after a switch or logout) is dropped. A read with no access keys
-    // leaves the current value alone.
-    private fun setAccess(uid: String, next: Access) {
+    // The single write path. [uid] and [store] are the user and the environment and tenant the
+    // request was made for, captured when it started. A result for another user (a stale response
+    // after a switch or logout) or for a configuration that has since been replaced is dropped,
+    // and a save always goes under the captured store. A read with no access keys leaves the
+    // current value alone.
+    private fun setAccess(uid: String, next: Access, store: AccessStore?) {
         if (!next.isPresent) return
         synchronized(accessLock) {
-            if (uid != _currentUserId.value) return
+            if (uid != _currentUserId.value || store != accessStore()) return
             val changed = !accessLoaded || _access.value != next
             accessLoaded = true
             publishAccess(next)
             if (!changed) return
-            accessStore()?.let { store ->
-                accessWriteScope.launch { runCatching { store.save(uid, next) } }
+            store?.let { target ->
+                accessWriteScope.launch { runCatching { target.save(uid, next) } }
             }
         }
     }
 
     // Load this user's stored copy before the first fetch.
-    private suspend fun loadCachedAccess(userId: String) {
+    private suspend fun loadCachedAccess(userId: String, store: AccessStore?) {
         if (accessLoaded) return
         val cached = try {
-            accessStore()?.load(userId)
+            store?.let { withContext(accessDispatcher) { it.load(userId) } }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             null
         } ?: return
         synchronized(accessLock) {
-            if (accessLoaded || _currentUserId.value != userId) return
+            if (accessLoaded || _currentUserId.value != userId || store != accessStore()) return
             accessLoaded = true
             publishAccess(cached)
         }
@@ -802,10 +838,11 @@ public object ZeroSettle {
     public suspend fun restoreEntitlements(): Result<List<Entitlement>> {
         val uid = currentUserIdOrNull() ?: return Result.failure(ZeroSettleError.UserNotIdentified)
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        val store = accessStore()
         return be.fetchEntitlements(uid).map { resp ->
             _entitlements.value = resp.entitlements
             _pendingClaims.value = resp.pendingClaims
-            setAccess(uid, resp.access())
+            setAccess(uid, resp.access(), store)
             publishPendingActionsWithEvents(parsePendingActions(resp.pendingActions))
             _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = resp.entitlements.size))
             resp.entitlements
