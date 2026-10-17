@@ -6,14 +6,10 @@ import com.google.common.truth.Truth.assertThat
 import com.zerosettle.sdk.Identity
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.ZeroSettleConfig
-import com.zerosettle.sdk.core.ZeroSettleEvent
 import com.zerosettle.sdk.models.Access
 import com.zerosettle.sdk.models.FeatureValue
 import com.zerosettle.sdk.models.Plan
 import com.zerosettle.sdk.models.PlanKind
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
@@ -158,19 +154,5 @@ class AccessStateTest {
         assertThat(ZeroSettle.hasAccess("quality")).isFalse()
         // Logout removes only the current user's entry.
         assertThat(store().load("u-one")).isNotNull()
-    }
-
-    @Test fun accessRefreshedEventOnChange() = runTest {
-        val events = mutableListOf<ZeroSettleEvent>()
-        val job = launch(UnconfinedTestDispatcher(testScheduler)) { ZeroSettle.events.toList(events) }
-        identify("u-evt")
-        server.enqueue(MockResponse().setBody(accessBody())) // identical
-        ZeroSettle.restoreEntitlements()
-        server.enqueue(MockResponse().setBody(accessBody(features = """{"z":true}"""))) // changed
-        ZeroSettle.restoreEntitlements()
-        job.cancel()
-        val refreshed = events.filterIsInstance<ZeroSettleEvent.AccessRefreshed>()
-        assertThat(refreshed).hasSize(2)
-        assertThat(refreshed.first().planKey).isEqualTo("pro")
     }
 }

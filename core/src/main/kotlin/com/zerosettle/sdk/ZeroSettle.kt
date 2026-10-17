@@ -621,7 +621,6 @@ public object ZeroSettle {
         if (uid != null && store != null) {
             accessWriteScope.launch { runCatching { store.save(uid, next) } }
         }
-        _events.tryEmit(ZeroSettleEvent.AccessRefreshed(planKey = next.plan?.key))
     }
 
     // Load this user's stored copy before the first fetch; drop a previous user's access.

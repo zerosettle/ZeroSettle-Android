@@ -16,7 +16,6 @@ class ZeroSettleEventTest {
             ZeroSettleEvent.EntitlementsRefreshed(count = 2),
             ZeroSettleEvent.PendingActionShown(actionType = "manual_play_cancel"),
             ZeroSettleEvent.OfferEvaluationFailed(reason = "boom"),
-            ZeroSettleEvent.AccessRefreshed(planKey = "pro"),
         )
         events.forEach { e ->
             val tag: String = when (e) {
@@ -30,7 +29,6 @@ class ZeroSettleEventTest {
                 is ZeroSettleEvent.EntitlementsRefreshed -> "er"
                 is ZeroSettleEvent.PendingActionShown -> "pa"
                 is ZeroSettleEvent.OfferEvaluationFailed -> "ef"
-                is ZeroSettleEvent.AccessRefreshed -> "ar"
             }
             assertThat(tag).isNotEmpty()
         }
