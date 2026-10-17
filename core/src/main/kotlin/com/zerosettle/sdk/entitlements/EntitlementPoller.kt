@@ -4,6 +4,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.zerosettle.sdk.core.Backend
+import com.zerosettle.sdk.models.Access
 import com.zerosettle.sdk.models.Entitlement
 import com.zerosettle.sdk.models.PendingAction
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,7 @@ internal class EntitlementPoller(
     private val onEntitlements: (List<Entitlement>) -> Unit,
     private val onPendingActions: (List<PendingAction>) -> Unit,
     private val onUnknownActionType: (String) -> Unit,
+    private val onAccess: (Access) -> Unit = {},
 ) {
     @Volatile private var scope: CoroutineScope? = null
     @Volatile private var periodicJob: Job? = null
@@ -81,6 +83,7 @@ internal class EntitlementPoller(
         val uid = userIdProvider() ?: return
         val resp = backend.fetchEntitlements(uid).getOrNull() ?: return
         onEntitlements(resp.entitlements)
+        onAccess(resp.access())
         onPendingActions(PendingActionParser.parse(resp.pendingActions, onUnknownActionType))
     }
 

@@ -85,4 +85,16 @@ class EntitlementPollerTest {
     @Test fun foregroundIntervalMillis_isFiveMinutes() {
         assertThat(EntitlementPoller.FOREGROUND_POLL_INTERVAL_MILLIS).isEqualTo(5L * 60 * 1000)
     }
+
+    @Test fun pollOnce_publishesDecodedAccess() = runTest {
+        server.enqueue(MockResponse().setBody("""{"entitlements":[],"features":{"a":true}}"""))
+        var access: com.zerosettle.sdk.models.Access? = null
+        val poller = EntitlementPoller(
+            backend = backend, userIdProvider = { "u1" },
+            onEntitlements = { }, onPendingActions = { }, onUnknownActionType = { },
+            onAccess = { access = it },
+        )
+        poller.pollOnce()
+        assertThat(access?.features?.get("a")).isEqualTo(com.zerosettle.sdk.models.FeatureValue.Bool(true))
+    }
 }

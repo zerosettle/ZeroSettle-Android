@@ -25,6 +25,9 @@ import com.zerosettle.sdk.core.ZeroSettleLogger
  *           keeps failing (per chunk-4 spec "Acknowledgement edge cases").
  * @property baseUrlOverride Dev-only; points the SDK at a local backend / ngrok
  *           tunnel. Production builds should leave this null.
+ * @property offlineFeatureDefaults Feature values [ZeroSettle.hasAccess] and [ZeroSettle.value] use
+ *           until the first access has loaded (from the on-device copy or the network).
+ *           Once any access has loaded they are ignored.
  * @property logger Pluggable logger; defaults to [LogcatLogger].
  */
 public data class ZeroSettleConfig(
@@ -35,6 +38,7 @@ public data class ZeroSettleConfig(
     val strictAck: Boolean = false,
     val baseUrlOverride: String? = null,
     val logger: ZeroSettleLogger = LogcatLogger,
+    val offlineFeatureDefaults: Map<String, com.zerosettle.sdk.models.FeatureValue> = emptyMap(),
 ) {
     init {
         require(publishableKey.startsWith(LIVE_PREFIX) || publishableKey.startsWith(TEST_PREFIX)) {

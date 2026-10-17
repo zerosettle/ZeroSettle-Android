@@ -7,7 +7,12 @@ import com.zerosettle.sdk.core.Backend
 import com.zerosettle.sdk.core.ZeroSettleEvent
 import com.zerosettle.sdk.internal.IdentityStore
 import com.zerosettle.sdk.internal.ZeroSettleScope
+import com.zerosettle.sdk.access.AccessStore
+import com.zerosettle.sdk.models.Access
+import com.zerosettle.sdk.models.Balance
 import com.zerosettle.sdk.models.Entitlement
+import com.zerosettle.sdk.models.FeatureValue
+import com.zerosettle.sdk.models.Plan
 import com.zerosettle.sdk.models.PendingAction
 import com.zerosettle.sdk.models.PendingClaim
 import com.zerosettle.sdk.models.Product
@@ -156,6 +161,7 @@ public object ZeroSettle {
         entitlementPoller = null
         ucbConfigRepository = null
         _isUcbEnabled.value = false
+        clearAccess(removeStoredEntry = false)
         this.appContext = context.applicationContext
         this.config = config
         this.identityStore = IdentityStore(context.applicationContext)
@@ -173,6 +179,7 @@ public object ZeroSettle {
                 _entitlements.value = ents
                 _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = ents.size))
             },
+            onAccess = { setAccess(it) },
             onPendingActions = { actions -> publishPendingActionsWithEvents(actions) },
             onUnknownActionType = { config?.logger?.info("pending_actions", it) },
         )
@@ -374,11 +381,13 @@ public object ZeroSettle {
         // region change between display and checkout can't diverge the
         // geo-targeted experiment variant. See [sessionStorefrontCountry].
         sessionStorefrontCountry = deviceStorefrontCountry()
+        loadCachedAccess(userId)
         val products = be.fetchProducts(userId, resolveStorefrontCountry()).getOrElse { return Result.failure(it) }
         val entResp = be.fetchEntitlements(userId).getOrElse { return Result.failure(it) }
         _products.value = products.products
         _entitlements.value = entResp.entitlements
         _pendingClaims.value = entResp.pendingClaims
+        setAccess(entResp.access())
         publishPendingActionsWithEvents(parsePendingActions(entResp.pendingActions))
         _isBootstrapped.value = true
         _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = entResp.entitlements.size))
@@ -467,6 +476,7 @@ public object ZeroSettle {
         // returns, against these snapshotted references.
         val oldCoordinator = playCoordinator
         val oldIdentityStore = identityStore
+        clearAccess(removeStoredEntry = true)
         entitlementPoller?.stop()
         // Clear the pending Play sync queue SYNCHRONOUSLY (not via ioScope)
         // before we relinquish the coordinator reference. The queue is keyed
@@ -530,6 +540,117 @@ public object ZeroSettle {
 
     private val _entitlements = MutableStateFlow<List<Entitlement>>(emptyList())
     public val entitlements: StateFlow<List<Entitlement>> = _entitlements.asStateFlow()
+
+    // ─── Access (plan, features, balances) ──────────────────────────────────
+
+    private val _access = MutableStateFlow(Access.EMPTY)
+
+    /** What the identified user can do: plan, add-ons, feature values and balances. */
+    public val access: StateFlow<Access> = _access.asStateFlow()
+
+    private val _plan = MutableStateFlow<Plan?>(null)
+    private val _addOns = MutableStateFlow<List<Plan>>(emptyList())
+    private val _features = MutableStateFlow<Map<String, FeatureValue>>(emptyMap())
+    private val _balances = MutableStateFlow<Map<String, Balance>>(emptyMap())
+
+    /** The base plan the user holds, or null. */
+    public val plan: StateFlow<Plan?> = _plan.asStateFlow()
+
+    /** Add-ons the user holds. */
+    public val addOns: StateFlow<List<Plan>> = _addOns.asStateFlow()
+
+    /** Feature values by the developer's own key. */
+    public val features: StateFlow<Map<String, FeatureValue>> = _features.asStateFlow()
+
+    /** Currency balances by currency key. */
+    public val balances: StateFlow<Map<String, Balance>> = _balances.asStateFlow()
+
+    // Callers hold accessLock.
+    private fun publishAccess(value: Access) {
+        _access.value = value
+        _plan.value = value.plan
+        _addOns.value = value.addOns
+        _features.value = value.features
+        _balances.value = value.balances
+    }
+
+    // True once any present access has loaded (cache or network); ends the offline defaults.
+    @Volatile private var accessLoaded = false
+    @Volatile private var accessUserId: String? = null
+    private val accessLock = Any()
+
+    // One thread, so a save queued before a removal can never land after it.
+    private val accessWriteScope: CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+
+    private fun accessStore(): AccessStore? {
+        val ctx = appContext ?: return null
+        val cfg = config ?: return null
+        return AccessStore(ctx, if (cfg.isSandbox) "test" else "live")
+    }
+
+    private fun featureOrDefault(key: String): FeatureValue? =
+        _access.value.features[key]
+            ?: if (accessLoaded) null else config?.offlineFeatureDefaults?.get(key)
+
+    /** True for a switch that is on or a non-empty text value. */
+    public fun hasAccess(key: String): Boolean = when (val v = featureOrDefault(key)) {
+        is FeatureValue.Bool -> v.value
+        is FeatureValue.Text -> v.value.isNotEmpty()
+        null -> false
+    }
+
+    /** The text value of a feature, or null for a switch or an unknown key. */
+    public fun value(key: String): String? = (featureOrDefault(key) as? FeatureValue.Text)?.value
+
+    /** The user's balance in the currency, or null. */
+    public fun balance(currencyKey: String): Balance? = _access.value.balances[currencyKey]
+
+    // The single write path. A read with no access keys leaves the current value alone.
+    private fun setAccess(next: Access) {
+        if (!next.isPresent) return
+        val changed: Boolean
+        synchronized(accessLock) {
+            changed = !accessLoaded || _access.value != next
+            accessLoaded = true
+            publishAccess(next)
+        }
+        if (!changed) return
+        val uid = _currentUserId.value
+        val store = accessStore()
+        if (uid != null && store != null) {
+            accessWriteScope.launch { runCatching { store.save(uid, next) } }
+        }
+        _events.tryEmit(ZeroSettleEvent.AccessRefreshed(planKey = next.plan?.key))
+    }
+
+    // Load this user's stored copy before the first fetch; drop a previous user's access.
+    private suspend fun loadCachedAccess(userId: String) {
+        if (accessUserId != userId) {
+            clearAccess(removeStoredEntry = false)
+            accessUserId = userId
+        }
+        if (accessLoaded) return
+        val cached = runCatching { accessStore()?.load(userId) }.getOrNull() ?: return
+        synchronized(accessLock) {
+            if (accessLoaded || accessUserId != userId) return
+            accessLoaded = true
+            publishAccess(cached)
+        }
+    }
+
+    private fun clearAccess(removeStoredEntry: Boolean) {
+        val uid = accessUserId ?: _currentUserId.value
+        val store = accessStore()
+        synchronized(accessLock) {
+            accessLoaded = false
+            accessUserId = null
+            publishAccess(Access.EMPTY)
+        }
+        if (removeStoredEntry && uid != null && store != null) {
+            accessWriteScope.launch { runCatching { store.remove(uid) } }
+        }
+    }
 
     public val activeEntitlements: List<Entitlement> get() = _entitlements.value.filter { it.isActive }
 
@@ -665,6 +786,7 @@ public object ZeroSettle {
         return be.fetchEntitlements(uid).map { resp ->
             _entitlements.value = resp.entitlements
             _pendingClaims.value = resp.pendingClaims
+            setAccess(resp.access())
             publishPendingActionsWithEvents(parsePendingActions(resp.pendingActions))
             _events.tryEmit(ZeroSettleEvent.EntitlementsRefreshed(count = resp.entitlements.size))
             resp.entitlements
@@ -1520,6 +1642,7 @@ public object ZeroSettle {
         _isBootstrapped.value = false
         _products.value = emptyList()
         _entitlements.value = emptyList()
+        clearAccess(removeStoredEntry = false)
         _pendingClaims.value = emptyList()
         _pendingActions.value = emptyList()
         _pendingCheckout.value = false

@@ -143,4 +143,15 @@ class ZeroSettlePublicApiTest {
         assertThat(res.isFailure).isTrue()
         assertThat(res.exceptionOrNull()).isInstanceOf(ZeroSettleError.BackendError::class.java)
     }
+
+    @Test fun accessMembers_existAndAreEmptyBeforeIdentify() {
+        assertThat(ZeroSettle.access.value.isPresent).isFalse()
+        assertThat(ZeroSettle.plan.value).isNull()
+        assertThat(ZeroSettle.addOns.value).isEmpty()
+        assertThat(ZeroSettle.features.value).isEmpty()
+        assertThat(ZeroSettle.balances.value).isEmpty()
+        assertThat(ZeroSettle.hasAccess("anything")).isFalse()
+        assertThat(ZeroSettle.value("anything")).isNull()
+        assertThat(ZeroSettle.balance("anything")).isNull()
+    }
 }

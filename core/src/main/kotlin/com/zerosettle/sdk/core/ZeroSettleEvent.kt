@@ -18,5 +18,7 @@ public sealed class ZeroSettleEvent {
     public data class MigrationCompleted(val productId: String) : ZeroSettleEvent()
     public data class SyncFailed(val purchaseToken: String, val attempts: Int, val terminal: Boolean) : ZeroSettleEvent()
     public data class EntitlementsRefreshed(val count: Int) : ZeroSettleEvent()
+    /** The user's plan, features or balances changed. [planKey] is the plan now held, if any. */
+    public data class AccessRefreshed(val planKey: String?) : ZeroSettleEvent()
     public data class PendingActionShown(val actionType: String) : ZeroSettleEvent()
 }
