@@ -661,12 +661,12 @@ internal data class EntitlementsResponse(
     // features and balances stay raw so one bad value is skipped, not fatal.
     val plan: JsonElement? = null,
     @SerialName("add_ons") val addOns: JsonElement? = null,
-    val features: JsonObject? = null,
-    val balances: JsonObject? = null,
+    val features: JsonElement? = null,
+    val balances: JsonElement? = null,
 ) {
     /** Decoded plan, add-ons, features and balances; malformed entries are skipped. */
     fun access(): Access {
-        val featureMap = features?.mapNotNull { (key, el) ->
+        val featureMap = (features as? JsonObject)?.mapNotNull { (key, el) ->
             val prim = el as? JsonPrimitive ?: return@mapNotNull null
             when {
                 prim is JsonNull -> null
@@ -675,7 +675,7 @@ internal data class EntitlementsResponse(
                 else -> null
             }
         }?.toMap().orEmpty()
-        val balanceMap = balances?.mapNotNull { (key, el) ->
+        val balanceMap = (balances as? JsonObject)?.mapNotNull { (key, el) ->
             runCatching { accessJson.decodeFromJsonElement(Balance.serializer(), el) }
                 .getOrNull()?.let { key to it }
         }?.toMap().orEmpty()
@@ -690,7 +690,9 @@ internal data class EntitlementsResponse(
             addOns = addOnList,
             features = featureMap,
             balances = balanceMap,
-            isPresent = listOf(plan, addOns, features, balances).any { it != null && it !is JsonNull },
+            // Presence follows the decoded shape, so a wrong-typed key never wipes a cached Access.
+            isPresent = plan is JsonObject || addOns is JsonArray ||
+                features is JsonObject || balances is JsonObject,
         )
     }
 }

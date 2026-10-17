@@ -93,4 +93,23 @@ class AccessDecodingTest {
             assertThat(access.addOns).containsExactly(Plan("a", "A", PlanKind.ADD_ON))
         }
     }
+
+    @Test fun wrongTypedFeaturesAndBalancesNeverFailEntitlements() {
+        val ent = """{"id":"e1","product_id":"pro","source":"web_checkout","is_active":true,"status":"active"}"""
+        for (bad in listOf("\"oops\"", "[]", "7")) {
+            val resp = decode("""{"entitlements":[$ent],"features":$bad,"balances":$bad,"add_ons":"x"}""")
+            assertThat(resp.entitlements).hasSize(1)
+            val access = resp.access()
+            assertThat(access.features).isEmpty()
+            assertThat(access.balances).isEmpty()
+            assertThat(access.isPresent).isFalse()
+        }
+    }
+
+    @Test fun partialResponseWithOnlyFeatures() {
+        val access = decode("""{"features":{"a":true}}""").access()
+        assertThat(access.isPresent).isTrue()
+        assertThat(access.plan).isNull()
+        assertThat(access.addOns).isEmpty()
+    }
 }
