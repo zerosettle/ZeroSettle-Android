@@ -28,8 +28,14 @@ val catalog = ZeroSettle.fetchProducts().getOrThrow()
 ZeroSettle.purchase(activity, productId = "pro_monthly")               // web checkout (Custom Tab)
 ZeroSettle.purchaseViaPlayBilling(activity, productId = "pro_monthly")  // native Play Billing
 
+// Check access by feature (works offline from the on-device copy):
+if (ZeroSettle.hasAccess("export_pdf")) { … }
+val quality = ZeroSettle.value("export_quality")       // text value, or null
+val credits = ZeroSettle.balance("credits")?.remaining
+
 // Observe:
 ZeroSettle.entitlements.collect { … }
+ZeroSettle.access.collect { … }           // plan, add-ons, features and balances
 ZeroSettle.pendingActions.collect { … }   // backend-initiated prompts (chunk-3 surface)
 ZeroSettle.events.collect { … }           // structured analytics events
 

@@ -16,6 +16,7 @@ ZeroSettle.configure(
         strictAck = false,                 // false → defensive-ack a Play purchase after 24h of failed sync
         baseUrlOverride = null,            // dev only — local backend / ngrok tunnel
         logger = LogcatLogger,             // pluggable ZeroSettleLogger
+        offlineFeatureDefaults = emptyMap(), // feature values used until the first access loads
     ),
 )
 ```
@@ -50,10 +51,34 @@ val activeEntitlements: List<Entitlement>            // derived accessor (not a 
 val pendingClaims:     StateFlow<List<PendingClaim>>  // cross-account ownership conflicts
 val pendingActions:    StateFlow<List<PendingAction>> // backend-initiated prompts
 val pendingCheckout:   StateFlow<Boolean>
+val access:            StateFlow<Access>              // plan, add-ons, features and balances together
+val plan:              StateFlow<Plan?>
+val addOns:            StateFlow<List<Plan>>
+val features:          StateFlow<Map<String, FeatureValue>>
+val balances:          StateFlow<Map<String, Balance>>
 val isConfigured:      StateFlow<Boolean>
 val isBootstrapped:    StateFlow<Boolean>
 val events:            SharedFlow<ZeroSettleEvent>    // structured analytics events
 ```
+
+## Check access by feature
+
+```kotlin
+ZeroSettle.hasAccess("export_pdf")        // true for a switch that is on, or any non-empty text value
+ZeroSettle.value("export_quality")        // the text value ("4K"), or null for a switch or unknown key
+ZeroSettle.balance("credits")             // Balance(remaining, limit, resetsAt, ...) or null
+```
+
+Keys are the ones you define in the ZeroSettle dashboard. Observe changes through the
+`access` StateFlow (there is no separate event); `plan`, `addOns`, `features` and `balances`
+are updated one after another, so use `access` when you need a consistent view.
+
+The last known access is kept on the device per user, so these reads work offline and at
+launch before the first network read. If a user has never loaded access, set
+`ZeroSettleConfig.offlineFeatureDefaults` to choose what `hasAccess` and `value` return until
+the first load; once any access has loaded, the defaults no longer apply. A response without
+access (an older backend) never clears what is already held. `logout()` clears the access and
+removes that user's stored copy.
 
 ## Purchase + sync
 

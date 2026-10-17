@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### SDK (`:core`)
+
+- **Check access by feature.** New `ZeroSettle.hasAccess(key)`, `value(key)` and `balance(currencyKey)`, and
+  StateFlows `access`, `plan`, `addOns`, `features` and `balances`. New model types `Access`, `Plan`,
+  `PlanKind`, `FeatureValue`, `Currency` and `Balance`.
+- The last known access is kept on the device per user, so reads work offline. New
+  `ZeroSettleConfig.offlineFeatureDefaults` (default empty) applies only until the first access loads.
+- Additive only: the new fields decode tolerantly and an older backend leaves held access untouched. There
+  is no new event type; observe changes through the `access` StateFlow.
+
 ## 1.3.0 — Cancel-flow model rewrite (decode-break fix) — 2026-06-25
 
 ### SDK (`:core`)

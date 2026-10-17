@@ -24,12 +24,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zerosettle.sdk.ZeroSettle
+import com.zerosettle.sdk.models.FeatureValue
 import kotlinx.coroutines.launch
 
 @Composable
 fun EntitlementsScreen() {
     val ents by ZeroSettle.entitlements.collectAsState()
     val claims by ZeroSettle.pendingClaims.collectAsState()
+    val plan by ZeroSettle.plan.collectAsState()
+    val addOns by ZeroSettle.addOns.collectAsState()
+    val features by ZeroSettle.features.collectAsState()
+    val balances by ZeroSettle.balances.collectAsState()
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("") }
 
@@ -46,6 +51,44 @@ fun EntitlementsScreen() {
         if (status.isNotBlank()) Text(status, style = MaterialTheme.typography.bodySmall)
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Plan", style = MaterialTheme.typography.titleMedium)
+                        Text(plan?.name ?: "No plan")
+                        if (addOns.isNotEmpty()) Text("Add-ons: ${addOns.joinToString { it.name }}")
+                    }
+                }
+            }
+            if (features.isNotEmpty()) {
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Features", style = MaterialTheme.typography.titleMedium)
+                            features.forEach { (key, v) ->
+                                Text("$key: " + when (v) {
+                                    is FeatureValue.Bool -> if (v.value) "on" else "off"
+                                    is FeatureValue.Text -> v.value
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+            if (balances.isNotEmpty()) {
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Balances", style = MaterialTheme.typography.titleMedium)
+                            balances.values.forEach { b ->
+                                val of = b.limit?.let { " of $it" } ?: ""
+                                val reset = b.resetsAt?.let { ", resets $it" } ?: ""
+                                Text("${b.currency.name}: ${b.remaining}$of left$reset")
+                            }
+                        }
+                    }
+                }
+            }
             items(ents) { e ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
