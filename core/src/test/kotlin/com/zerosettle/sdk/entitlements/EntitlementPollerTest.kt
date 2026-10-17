@@ -92,7 +92,7 @@ class EntitlementPollerTest {
         val poller = EntitlementPoller(
             backend = backend, userIdProvider = { "u1" },
             onEntitlements = { }, onPendingActions = { }, onUnknownActionType = { },
-            onAccess = { access = it },
+            onAccess = { _, a -> access = a },
         )
         poller.pollOnce()
         assertThat(access?.features?.get("a")).isEqualTo(com.zerosettle.sdk.models.FeatureValue.Bool(true))

@@ -10,8 +10,10 @@ import com.zerosettle.sdk.models.Access
 import com.zerosettle.sdk.models.FeatureValue
 import com.zerosettle.sdk.models.Plan
 import com.zerosettle.sdk.models.PlanKind
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -154,5 +156,53 @@ class AccessStateTest {
         assertThat(ZeroSettle.hasAccess("quality")).isFalse()
         // Logout removes only the current user's entry.
         assertThat(store().load("u-one")).isNotNull()
+    }
+
+    private fun delayedEntitlements(features: String) = MockResponse()
+        .setBody(accessBody(features = features)).setBodyDelay(1_500, java.util.concurrent.TimeUnit.MILLISECONDS)
+
+    private fun awaitRequests(count: Int) = awaitUntil { server.requestCount >= count }
+
+    @Test fun staleResponseForPreviousUserIsDropped() = runTest {
+        identify("u-a", accessBody(features = """{"a_only":true}"""))
+        awaitUntil { runBlocking { store().load("u-a") } != null }
+        server.enqueue(delayedEntitlements("""{"a_late":true}"""))
+        val stale = async(Dispatchers.IO) { ZeroSettle.restoreEntitlements() }
+        awaitRequests(4)
+        identify("u-b", accessBody(features = """{"b_only":true}"""))
+        awaitUntil { runBlocking { store().load("u-b") } != null }
+        stale.await()
+        Thread.sleep(300)
+        assertThat(ZeroSettle.hasAccess("a_late")).isFalse()
+        assertThat(ZeroSettle.hasAccess("b_only")).isTrue()
+        assertThat(store().load("u-b")?.features?.keys).containsExactly("b_only")
+        assertThat(store().load("u-a")?.features?.keys).containsExactly("a_only")
+    }
+
+    @Test fun logoutCannotBeUndoneByInFlightRefresh() = runTest {
+        identify("u-lo")
+        awaitUntil { runBlocking { store().load("u-lo") } != null }
+        server.enqueue(delayedEntitlements("""{"late":true}"""))
+        val stale = async(Dispatchers.IO) { ZeroSettle.restoreEntitlements() }
+        awaitRequests(4)
+        ZeroSettle.logout()
+        stale.await()
+        Thread.sleep(300)
+        assertThat(ZeroSettle.access.value).isEqualTo(Access.EMPTY)
+        assertThat(ZeroSettle.hasAccess("late")).isFalse()
+        assertThat(store().load("u-lo")).isNull()
+    }
+
+    @Test fun previousUsersFeaturesNeverVisibleAfterSwitch() = runTest {
+        identify("u-prev", accessBody(features = """{"prev_only":true}"""))
+        // A failing products fetch ends bootstrap before it starts the poller, which needs the main thread.
+        server.enqueue(MockResponse().setResponseCode(500).setBodyDelay(1_500, java.util.concurrent.TimeUnit.MILLISECONDS))
+        val switching = async(Dispatchers.IO) { ZeroSettle.identify(Identity.User(id = "u-next")) }
+        awaitRequests(4)
+        assertThat(ZeroSettle.activeUserIdForTesting()).isEqualTo("u-next")
+        assertThat(ZeroSettle.hasAccess("prev_only")).isFalse()
+        assertThat(ZeroSettle.access.value).isEqualTo(Access.EMPTY)
+        switching.await()
+        assertThat(ZeroSettle.hasAccess("prev_only")).isFalse()
     }
 }

@@ -32,7 +32,7 @@ internal class EntitlementPoller(
     private val onEntitlements: (List<Entitlement>) -> Unit,
     private val onPendingActions: (List<PendingAction>) -> Unit,
     private val onUnknownActionType: (String) -> Unit,
-    private val onAccess: (Access) -> Unit = {},
+    private val onAccess: (userId: String, access: Access) -> Unit = { _, _ -> },
 ) {
     @Volatile private var scope: CoroutineScope? = null
     @Volatile private var periodicJob: Job? = null
@@ -83,7 +83,7 @@ internal class EntitlementPoller(
         val uid = userIdProvider() ?: return
         val resp = backend.fetchEntitlements(uid).getOrNull() ?: return
         onEntitlements(resp.entitlements)
-        onAccess(resp.access())
+        onAccess(uid, resp.access())
         onPendingActions(PendingActionParser.parse(resp.pendingActions, onUnknownActionType))
     }
 

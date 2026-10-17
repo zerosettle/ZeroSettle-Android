@@ -2,6 +2,7 @@ package com.zerosettle.sdk
 
 import com.zerosettle.sdk.core.LogcatLogger
 import com.zerosettle.sdk.core.ZeroSettleLogger
+import com.zerosettle.sdk.models.FeatureValue
 
 /**
  * SDK-wide configuration passed to [ZeroSettle.configure]. Immutable; replace by
@@ -38,7 +39,7 @@ public data class ZeroSettleConfig(
     val strictAck: Boolean = false,
     val baseUrlOverride: String? = null,
     val logger: ZeroSettleLogger = LogcatLogger,
-    val offlineFeatureDefaults: Map<String, com.zerosettle.sdk.models.FeatureValue> = emptyMap(),
+    val offlineFeatureDefaults: Map<String, FeatureValue> = emptyMap(),
 ) {
     init {
         require(publishableKey.startsWith(LIVE_PREFIX) || publishableKey.startsWith(TEST_PREFIX)) {
