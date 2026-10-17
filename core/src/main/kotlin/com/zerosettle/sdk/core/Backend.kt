@@ -1,7 +1,11 @@
 package com.zerosettle.sdk.core
 
 import com.zerosettle.sdk.billing.UcbConfig
+import com.zerosettle.sdk.models.Access
+import com.zerosettle.sdk.models.Balance
 import com.zerosettle.sdk.models.Entitlement
+import com.zerosettle.sdk.models.FeatureValue
+import com.zerosettle.sdk.models.Plan
 import com.zerosettle.sdk.models.PendingClaim
 import com.zerosettle.sdk.models.ProductCatalog
 import com.zerosettle.sdk.models.UserOffer
@@ -10,7 +14,11 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
 
 /**
  * Typed wrapper over `/v1/iap/`. Owns JSON (de)serialization; throws no exceptions
@@ -647,4 +655,36 @@ internal data class EntitlementsResponse(
     // consume `pendingClaims` and the backend is expected to surface it. Conflicts are
     // currently surfaced via [PlaySyncResponse.conflict] / .claimAvailable instead.
     @SerialName("pending_claims") val pendingClaims: List<PendingClaim> = emptyList(),
-)
+    // Plans and usage: absent from an older backend, or when resolving failed.
+    // features and balances stay raw so one bad value is skipped, not fatal.
+    val plan: Plan? = null,
+    @SerialName("add_ons") val addOns: List<Plan>? = null,
+    val features: JsonObject? = null,
+    val balances: JsonObject? = null,
+) {
+    /** Decoded plan, add-ons, features and balances; malformed entries are skipped. */
+    fun access(): Access {
+        val featureMap = features?.mapNotNull { (key, el) ->
+            val prim = el as? JsonPrimitive ?: return@mapNotNull null
+            when {
+                prim is JsonNull -> null
+                prim.isString -> key to FeatureValue.Text(prim.content)
+                prim.booleanOrNull != null -> key to FeatureValue.Bool(prim.boolean)
+                else -> null
+            }
+        }?.toMap().orEmpty()
+        val balanceMap = balances?.mapNotNull { (key, el) ->
+            runCatching { accessJson.decodeFromJsonElement(Balance.serializer(), el) }
+                .getOrNull()?.let { key to it }
+        }?.toMap().orEmpty()
+        return Access(
+            plan = plan,
+            addOns = addOns.orEmpty(),
+            features = featureMap,
+            balances = balanceMap,
+            isPresent = plan != null || addOns != null || features != null || balances != null,
+        )
+    }
+}
+
+private val accessJson = Json { ignoreUnknownKeys = true; explicitNulls = false }
