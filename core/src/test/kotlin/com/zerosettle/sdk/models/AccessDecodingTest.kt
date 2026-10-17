@@ -82,4 +82,15 @@ class AccessDecodingTest {
         assertThat(access.plan?.key).isEqualTo("pro")
         assertThat(access.features).containsKey("a")
     }
+
+    @Test fun malformedPlanNeverFailsEntitlements() {
+        val ent = """{"id":"e1","product_id":"pro","source":"web_checkout","is_active":true,"status":"active"}"""
+        for (bad in listOf("\"oops\"", """{"key":5}""")) {
+            val resp = decode("""{"entitlements":[$ent],"plan":$bad,"add_ons":[{"key":5},{"key":"a","name":"A","kind":"add_on"}]}""")
+            assertThat(resp.entitlements).hasSize(1)
+            val access = resp.access()
+            assertThat(access.plan).isNull()
+            assertThat(access.addOns).containsExactly(Plan("a", "A", PlanKind.ADD_ON))
+        }
+    }
 }

@@ -14,6 +14,8 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -657,8 +659,8 @@ internal data class EntitlementsResponse(
     @SerialName("pending_claims") val pendingClaims: List<PendingClaim> = emptyList(),
     // Plans and usage: absent from an older backend, or when resolving failed.
     // features and balances stay raw so one bad value is skipped, not fatal.
-    val plan: Plan? = null,
-    @SerialName("add_ons") val addOns: List<Plan>? = null,
+    val plan: JsonElement? = null,
+    @SerialName("add_ons") val addOns: JsonElement? = null,
     val features: JsonObject? = null,
     val balances: JsonObject? = null,
 ) {
@@ -677,12 +679,18 @@ internal data class EntitlementsResponse(
             runCatching { accessJson.decodeFromJsonElement(Balance.serializer(), el) }
                 .getOrNull()?.let { key to it }
         }?.toMap().orEmpty()
+        val planValue = plan.takeUnless { it is JsonNull }?.let {
+            runCatching { accessJson.decodeFromJsonElement(Plan.serializer(), it) }.getOrNull()
+        }
+        val addOnList = (addOns as? JsonArray)?.mapNotNull {
+            runCatching { accessJson.decodeFromJsonElement(Plan.serializer(), it) }.getOrNull()
+        }.orEmpty()
         return Access(
-            plan = plan,
-            addOns = addOns.orEmpty(),
+            plan = planValue,
+            addOns = addOnList,
             features = featureMap,
             balances = balanceMap,
-            isPresent = plan != null || addOns != null || features != null || balances != null,
+            isPresent = listOf(plan, addOns, features, balances).any { it != null && it !is JsonNull },
         )
     }
 }
