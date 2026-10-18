@@ -165,15 +165,25 @@ public object ZeroSettle {
         ucbConfigRepository = null
         _isUcbEnabled.value = false
         clearAccess()
+        val baseUrl = config.baseUrlOverride ?: DEFAULT_BASE_URL
+        val reporterChanged = reportedPublishableKey != config.publishableKey || reportedBaseUrl != baseUrl
         this.appContext = context.applicationContext
         this.config = config
         this.identityStore = IdentityStore(context.applicationContext)
         this.offerDismissalStore = com.zerosettle.sdk.offers.OfferDismissalStore(context.applicationContext)
         this.backend = Backend(
-            baseUrl = config.baseUrlOverride ?: DEFAULT_BASE_URL,
+            baseUrl = baseUrl,
             publishableKey = config.publishableKey,
             sdkVersion = sdkVersion,
         )
+        if (reporterChanged) {
+            val reportBackend = this.backend!!
+            featureCheckReporter.reset(
+                com.zerosettle.sdk.access.FeatureCheckSender { keys -> reportBackend.reportFeatureChecks(keys) },
+            )
+            reportedPublishableKey = config.publishableKey
+            reportedBaseUrl = baseUrl
+        }
         this.ucbConfigRepository = com.zerosettle.sdk.billing.UcbConfigRepository(this.backend!!)
         this.entitlementPoller = com.zerosettle.sdk.entitlements.EntitlementPoller(
             backend = this.backend!!,
@@ -623,9 +633,17 @@ public object ZeroSettle {
         return AccessStore(ctx, if (cfg.isSandbox) "test" else "live", AccessStore.keyHash(cfg.publishableKey))
     }
 
-    private fun featureOrDefault(key: String): FeatureValue? =
-        _access.value.features[key]
+    private fun featureOrDefault(key: String): FeatureValue? {
+        featureCheckReporter.note(key)
+        return _access.value.features[key]
             ?: if (accessLoaded) null else config?.offlineFeatureDefaults?.get(key)
+    }
+
+    // Reports the keys hasAccess and value check. Runs on the process-lifetime ioScope so logout
+    // (which cancels `scope`) never stops it.
+    private val featureCheckReporter = com.zerosettle.sdk.access.FeatureCheckReporter(ioScope)
+    private var reportedPublishableKey: String? = null
+    private var reportedBaseUrl: String? = null
 
     /**
      * True for a switch that is on or a non-empty text value. A key absent from loaded access is

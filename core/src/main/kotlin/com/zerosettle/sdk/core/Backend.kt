@@ -151,6 +151,18 @@ internal class Backend(
         return http.post("/v1/iap/offer-viewed/", body).map { }
     }
 
+    /**
+     * `POST /v1/iap/features/checked/` — the feature keys the app has checked. 204 on success;
+     * the backend accepts at most 50 keys of at most 64 code points each.
+     */
+    suspend fun reportFeatureChecks(keys: List<String>): Result<Unit> {
+        val body = json.encodeToString(
+            JsonObject.serializer(),
+            JsonObject(mapOf("keys" to JsonArray(keys.map { JsonPrimitive(it) }))),
+        )
+        return http.post("/v1/iap/features/checked/", body).map { }
+    }
+
     // ─── Subscription management ───────────────────────────────────────────
 
     /** `POST /v1/iap/subscriptions/cancel/` — cancels a web-checkout subscription. */
