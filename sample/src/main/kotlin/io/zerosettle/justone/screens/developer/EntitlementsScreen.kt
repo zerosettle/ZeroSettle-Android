@@ -68,8 +68,8 @@ fun EntitlementsScreen() {
                             Text("Features", style = MaterialTheme.typography.titleMedium)
                             features.forEach { (key, v) ->
                                 Text("$key: " + when (v) {
-                                    is FeatureValue.Bool -> if (v.value) "on" else "off"
-                                    is FeatureValue.Text -> v.value
+                                    is FeatureValue.Bool -> if (ZeroSettle.hasAccess(key)) "on" else "off"
+                                    is FeatureValue.Text -> ZeroSettle.value(key).orEmpty()
                                 })
                             }
                         }
