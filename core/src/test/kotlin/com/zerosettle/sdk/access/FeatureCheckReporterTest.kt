@@ -30,7 +30,8 @@ class FeatureCheckReporterTest {
         }
     }
 
-    private fun TestScope.reporter() = FeatureCheckReporter(this, 2_000, 60_000, { testScheduler.currentTime })
+    private fun TestScope.reporter(pause: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) }) =
+        FeatureCheckReporter(this, 2_000, 60_000, { testScheduler.currentTime }, pause)
 
     private fun TestScope.flush() { advanceTimeBy(2_001); runCurrent() }
 
@@ -162,8 +163,30 @@ class FeatureCheckReporterTest {
         r.reset(s2)
         runCurrent()
         assertThat(s2.sentKeys).isEmpty()
-        assertThat(s2.sentKeys).doesNotContain("old1")
         r.note("new1"); flush()
         assertThat(s2.sentKeys).containsExactly("new1")
+    }
+
+    @Test fun oldGenerationFinallyDoesNotClearTheNewFlag() = runTest {
+        val r = reporter(); val s1 = FakeSender(); val s2 = FakeSender()
+        r.reset(s1); r.note("a"); runCurrent()
+        s2.gate = CompletableDeferred()
+        r.reset(s2); r.note("n1"); runCurrent()
+        r.note("n2")
+        flush()
+        s2.gate!!.complete(Unit); flush()
+        assertThat(s2.batches).hasSize(1)
+    }
+
+    @Test fun staleFlushDoesNotSendThroughTheNewSender() = runTest {
+        val s2 = FakeSender()
+        lateinit var r: FeatureCheckReporter
+        var first = true
+        r = reporter { ms ->
+            if (first) { first = false; r.reset(s2); r.note("n1") } else kotlinx.coroutines.delay(ms)
+        }
+        r.reset(FakeSender()); r.note("old")
+        flush(); flush()
+        assertThat(s2.sentKeys).containsExactly("n1")
     }
 }

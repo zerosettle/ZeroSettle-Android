@@ -1713,6 +1713,9 @@ public object ZeroSettle {
     internal fun resetForTesting() {
         scope.reset()
         _isConfigured.value = false
+        featureCheckReporter.reset(com.zerosettle.sdk.access.FeatureCheckSender { Result.success(Unit) })
+        reportedPublishableKey = null
+        reportedBaseUrl = null
         _isBootstrapped.value = false
         _products.value = emptyList()
         _entitlements.value = emptyList()

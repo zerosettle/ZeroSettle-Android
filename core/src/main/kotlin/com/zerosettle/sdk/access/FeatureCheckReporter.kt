@@ -3,6 +3,7 @@ package com.zerosettle.sdk.access
 import com.zerosettle.sdk.models.ZeroSettleError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -27,6 +28,7 @@ internal class FeatureCheckReporter(
     private val flushDelayMs: Long = FLUSH_DELAY_MS,
     private val backoffMs: Long = BACKOFF_MS,
     private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val pause: suspend (Long) -> Unit = { delay(it) },
 ) {
     private val lock = Any()
     private val sent = HashSet<String>()
@@ -69,10 +71,11 @@ internal class FeatureCheckReporter(
         if (scheduled || clock() < backoffUntil) return
         scheduled = true
         val gen = generation
-        job = scope.launch {
+        // ATOMIC: a flush cancelled before it is dispatched still runs its finally.
+        job = scope.launch(start = CoroutineStart.ATOMIC) {
             var failed = true
             try {
-                delay(flushDelayMs)
+                pause(flushDelayMs)
                 failed = flush(gen)
             } finally {
                 synchronized(lock) {
