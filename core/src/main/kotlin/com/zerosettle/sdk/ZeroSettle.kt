@@ -346,8 +346,7 @@ public object ZeroSettle {
      * The one path `identify(Identity.User)` and `reconcile` both use to become a user.
      * On a signed-in A to B switch without logout it warns (when [warnOnSwitch]). The Play
      * pending-sync queue is left alone: each row carries its own user id, so A's rows retry
-     * under A. Purchases made under A are kept out of B by the account-id check in
-     * `PlayBillingCoordinator`.
+     * under A. The backend attributes purchases by Play token; the SDK never skips one.
      */
     private suspend fun runIdentifyUser(
         id: String, name: String?, email: String?, warnOnSwitch: Boolean,

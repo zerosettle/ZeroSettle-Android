@@ -240,24 +240,10 @@ internal class PlayBillingCoordinator(
             "reconcile: found ${subs.size} owned SUBS + ${inapp.size} owned INAPP purchase(s) for uid=$uid — syncing",
         )
         if (subs.isEmpty() && inapp.isEmpty()) return
-        for (p in (subs + inapp).filter(::belongsToCurrentUser)) {
+        for (p in subs + inapp) {
             processor.process(PlayBillingManager.describePurchase(p, uid, customerNameProvider(), customerEmailProvider()))
         }
         onEntitlementsMayHaveChanged()
-    }
-
-    /**
-     * False when [p] was bought under a different account than the current user: its
-     * non-null obfuscated account id differs from the one derived for the current user.
-     * Such a purchase is skipped (left unacknowledged) so it is never synced under the
-     * wrong id after an identify A to B switch. A purchase with no id is treated as current.
-     */
-    private fun belongsToCurrentUser(p: Purchase): Boolean {
-        val token = p.accountIdentifiers?.obfuscatedAccountId?.takeIf { it.isNotEmpty() } ?: return true
-        val expected = obfuscatedAccountIdProvider() ?: return true
-        if (token.equals(expected, ignoreCase = true)) return true
-        logger.info("billing", "skipping purchase ${p.products.firstOrNull()}: bought under a different account id")
-        return false
     }
 
     /** Native Play Billing purchase: query details → launch flow. The result is delivered via [handlePurchases]. */
@@ -279,7 +265,7 @@ internal class PlayBillingCoordinator(
 
     private suspend fun handlePurchases(purchases: List<Purchase>) {
         val uid = userIdProvider() ?: return
-        for (p in purchases.filter(::belongsToCurrentUser)) {
+        for (p in purchases) {
             processor.process(PlayBillingManager.describePurchase(p, uid, customerNameProvider(), customerEmailProvider()))
         }
         processor.retryQueued()

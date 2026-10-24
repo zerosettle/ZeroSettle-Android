@@ -62,13 +62,19 @@ class IdentifySwitchTest {
         assertThat(ZeroSettle.userSwitchWarningCount).isEqualTo(0)
     }
 
-    @Test fun switchAtoB_keepsAsRowForRetryUnderA() = runTest {
+    @Test fun switchAtoB_keepsAsRow_andRetriesItUnderA() = runTest {
+        routeSync()
         ZeroSettle.identify(Identity.User(id = "A"))
         ZeroSettle.playSyncQueueForTesting().enqueue(row("tokA", "A"))
         ZeroSettle.identify(Identity.User(id = "B"))
         val pending = ZeroSettle.playSyncQueueForTesting().pending()
         assertThat(pending.map { it.purchaseToken }).containsExactly("tokA")
         assertThat(pending.single().userId).isEqualTo("A")
+        // The new coordinator's start() retries the row; it must go out under A's id.
+        val deadline = System.currentTimeMillis() + 5000
+        while (!syncedUsers.contains("A") && System.currentTimeMillis() < deadline) kotlinx.coroutines.delay(50)
+        assertThat(syncedUsers).contains("A")
+        assertThat(syncedUsers).doesNotContain("B")
     }
 
     @Test fun reidentifySameUser_keepsQueue() = runTest {
@@ -101,18 +107,17 @@ class IdentifySwitchTest {
     private fun tokenFor(uid: String) =
         AppAccountToken.derive(uid, ApplicationProvider.getApplicationContext<android.content.Context>().packageName).toString()
 
-    @Test fun afterSwitchToB_purchaseWithAsToken_isNotSynced_butBsAndUntaggedAre() = runTest {
+    @Test fun purchaseIsAlwaysProcessed_regardlessOfObfuscatedAccountId() = runTest {
         routeSync()
         ZeroSettle.identify(Identity.User(id = "A"))
         ZeroSettle.identify(Identity.User(id = "B"))
         syncedUsers.clear()
+        // Reaching the sync (owned=true) means the processor runs its acknowledge step;
+        // nothing on the device skips a purchase, whichever account id it carries.
         ZeroSettle.playCoordinator!!.reconcileWithPurchasesForTesting(
-            subs = listOf(purchase("fromA", tokenFor("A"))), inapp = emptyList(),
+            subs = listOf(purchase("fromA", tokenFor("A")), purchase("fromB", tokenFor("B")), purchase("untagged", null)),
+            inapp = emptyList(),
         )
-        assertThat(syncedUsers).isEmpty()
-        ZeroSettle.playCoordinator!!.reconcileWithPurchasesForTesting(
-            subs = listOf(purchase("fromB", tokenFor("B")), purchase("untagged", null)), inapp = emptyList(),
-        )
-        assertThat(syncedUsers).containsExactly("B", "B")
+        assertThat(syncedUsers).containsExactly("B", "B", "B")
     }
 }
