@@ -126,6 +126,62 @@ internal class Backend(
         return http.post("/v1/iap/offer-viewed/", body).map { }
     }
 
+    /**
+     * `POST /v1/iap/events/` — paywall / checkout funnel event. `environment` is not
+     * sent on Android (Play has no environment value).
+     */
+    suspend fun trackFunnelEvent(
+        eventType: String, userId: String, productId: String, screenName: String?, metadata: Map<String, String>?,
+    ): Result<Unit> {
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("event_type", kotlinx.serialization.json.JsonPrimitive(eventType))
+            put("user_id", kotlinx.serialization.json.JsonPrimitive(userId))
+            put("product_id", kotlinx.serialization.json.JsonPrimitive(productId))
+            screenName?.let { put("screen_name", kotlinx.serialization.json.JsonPrimitive(it)) }
+            metadata?.let { m ->
+                put("metadata", kotlinx.serialization.json.buildJsonObject {
+                    m.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) }
+                })
+            }
+        }.toString()
+        return http.post("/v1/iap/events/", body).map { }
+    }
+
+    /** `POST /v1/iap/identities/reconcile/` — single attempt; maps 409/401/429 to typed errors. */
+    suspend fun reconcile(linkToken: String): Result<com.zerosettle.sdk.models.ReconcileResult> {
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("link_token", kotlinx.serialization.json.JsonPrimitive(linkToken))
+        }.toString()
+        val raw = http.postRaw("/v1/iap/identities/reconcile/", body).getOrElse { return Result.failure(it) }
+        return when {
+            raw.statusCode in 200..299 -> try {
+                val r = json.decodeFromString(ReconcileWire.serializer(), raw.body)
+                Result.success(
+                    com.zerosettle.sdk.models.ReconcileResult(
+                        reconciliationId = r.reconciliationId, fromUserId = r.from, intoUserId = r.into,
+                        movedTransactions = r.moved.transactions, movedEntitlements = r.moved.entitlements,
+                    ),
+                )
+            } catch (e: Throwable) {
+                Result.failure(ZeroSettleError.BackendError(statusCode = raw.statusCode, body = "decode_failed: ${e.message}"))
+            }
+            raw.statusCode == 409 -> Result.failure(ZeroSettleError.ReconcileRefused)
+            raw.statusCode == 401 && errorCode(raw.body) == "invalid_link_token" ->
+                Result.failure(ZeroSettleError.InvalidLinkToken)
+            raw.statusCode == 429 -> {
+                val seconds = raw.headers["retry-after"]?.trim()?.toDoubleOrNull()?.takeIf { it >= 0 }?.toLong()
+                Result.failure(ZeroSettleError.RateLimited(seconds))
+            }
+            else -> Result.failure(ZeroSettleError.BackendError(statusCode = raw.statusCode, body = raw.body))
+        }
+    }
+
+    private fun errorCode(body: String): String? = runCatching {
+        (json.parseToJsonElement(body) as? JsonObject)
+            ?.get("error")?.let { it as? JsonObject }
+            ?.get("code")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+    }.getOrNull()
+
     // ─── Subscription management ───────────────────────────────────────────
 
     /** `POST /v1/iap/subscriptions/cancel/` — cancels a web-checkout subscription. */
@@ -626,3 +682,14 @@ internal data class EntitlementsResponse(
     // currently surfaced via [PlaySyncResponse.conflict] / .claimAvailable instead.
     @SerialName("pending_claims") val pendingClaims: List<PendingClaim> = emptyList(),
 )
+
+@Serializable
+internal data class ReconcileWire(
+    @SerialName("reconciliation_id") val reconciliationId: Int,
+    val from: String,
+    val into: String,
+    val moved: Moved,
+) {
+    @Serializable
+    data class Moved(val transactions: Int = 0, val entitlements: Int = 0)
+}

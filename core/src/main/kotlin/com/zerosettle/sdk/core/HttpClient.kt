@@ -34,6 +34,24 @@ internal class HttpClient(
     suspend fun post(path: String, body: String): Result<String> =
         doRequest(buildPost(path, body))
 
+    /** A non-throwing view of an HTTP response, for callers that map status codes themselves. */
+    internal class RawResponse(val statusCode: Int, val headers: Map<String, String>, val body: String)
+
+    /**
+     * Single-attempt POST that returns every HTTP status as a [RawResponse] (no retry:
+     * for single-use requests such as reconcile). IO failure → [ZeroSettleError.NetworkError].
+     */
+    suspend fun postRaw(path: String, body: String): Result<RawResponse> = withContext(Dispatchers.IO) {
+        try {
+            ok.newCall(buildPost(path, body)).execute().use { resp ->
+                val headers = resp.headers.names().associate { it.lowercase() to (resp.header(it) ?: "") }
+                Result.success(RawResponse(resp.code, headers, resp.body?.string().orEmpty()))
+            }
+        } catch (io: IOException) {
+            Result.failure(ZeroSettleError.NetworkError(io))
+        }
+    }
+
     private fun buildGet(path: String): Request = Request.Builder()
         .url(baseUrl + path)
         .get()

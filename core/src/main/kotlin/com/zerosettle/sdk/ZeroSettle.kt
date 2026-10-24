@@ -325,24 +325,117 @@ public object ZeroSettle {
         val store = identityStore ?: return Result.failure(ZeroSettleError.NotConfigured)
 
         return when (identity) {
-            is Identity.User -> {
-                _currentUserId.value = identity.id
-                store.setActiveUserId(identity.id)
-                identity.name?.let { customerName = it }
-                identity.email?.let { customerEmail = it }
-                if (identity.name != null || identity.email != null) {
-                    store.setCustomer(name = customerName, email = customerEmail)
-                }
-                bootstrap(identity.id)
-            }
+            is Identity.User -> runIdentifyUser(identity.id, identity.name, identity.email, warnOnSwitch = true)
             Identity.Anonymous -> {
                 val uuid = store.anonymousUuid()
+                lastSignedInUserId = null
                 _currentUserId.value = uuid
                 store.setActiveUserId(uuid)
                 bootstrap(uuid)
             }
             Identity.Deferred -> Result.success(null)
         }
+    }
+
+    /** The last signed-in (non-anonymous) id, used only to warn on a user-to-user switch. Cleared by logout. */
+    @Volatile private var lastSignedInUserId: String? = null
+    @Volatile internal var userSwitchWarningCount: Int = 0
+        private set
+
+    /**
+     * The one path `identify(Identity.User)` and `reconcile` both use to become a user.
+     * On a signed-in A to B switch without logout it warns (when [warnOnSwitch]) and
+     * clears the Play pending-sync queue synchronously, so purchases queued under A
+     * are never retried once B is active.
+     */
+    private suspend fun runIdentifyUser(
+        id: String, name: String?, email: String?, warnOnSwitch: Boolean,
+    ): Result<ProductCatalog?> {
+        val store = identityStore ?: return Result.failure(ZeroSettleError.NotConfigured)
+        val previous = lastSignedInUserId
+        if (previous != null && !previous.equals(id, ignoreCase = true)) {
+            if (warnOnSwitch) {
+                userSwitchWarningCount++
+                config?.logger?.warn(
+                    "identity",
+                    "identify switched from one signed-in user to another without logout(). " +
+                        "Purchases stay with the first id. If this is the same person, have your server reconcile the ids.",
+                )
+            }
+            playCoordinator?.queue?.clear()
+        }
+        lastSignedInUserId = id
+        _currentUserId.value = id
+        store.setActiveUserId(id)
+        name?.let { customerName = it }
+        email?.let { customerEmail = it }
+        if (name != null || email != null) {
+            store.setCustomer(name = customerName, email = customerEmail)
+        }
+        return bootstrap(id)
+    }
+
+    /**
+     * The id the SDK uses for this person in paywall and offer events: [currentUserId]
+     * when set, otherwise the persisted anonymous UUID (generated and stored if none
+     * exists yet), the same one `identify(Identity.Anonymous)` adopts, so events
+     * recorded before identify join purchases made after it. Stable until [logout].
+     * Null only before [configure].
+     */
+    public suspend fun analyticsUserId(): String? {
+        _currentUserId.value?.takeIf { it.isNotEmpty() }?.let { return it }
+        return identityStore?.anonymousUuid()
+    }
+
+    /**
+     * Fire-and-forget paywall / checkout funnel event (`POST /v1/iap/events/`). Runs on
+     * the SDK's IO scope; failures are logged at debug level and never thrown.
+     */
+    public fun trackEvent(
+        type: com.zerosettle.sdk.models.FunnelEventType,
+        productId: String,
+        screenName: String? = null,
+        metadata: Map<String, String>? = null,
+    ) {
+        ioScope.launch {
+            val be = backend ?: run {
+                config?.logger?.debug("events", "trackEvent: SDK not configured, dropping event")
+                return@launch
+            }
+            runCatching {
+                val uid = analyticsUserId() ?: return@launch
+                be.trackFunnelEvent(type.wireValue, uid, productId, screenName, metadata)
+                    .onFailure { config?.logger?.debug("events", "trackEvent: failed to send ${type.wireValue}: ${it.message}") }
+            }.onFailure { config?.logger?.debug("events", "trackEvent: failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * Finish a guest-to-account move with a short-lived link token your server signed
+     * (`POST /v1/iap/identities/reconcile/`). A token is single-use, even when refused,
+     * so this is never retried automatically.
+     *
+     * On success, if the SDK is currently acting as the moved id ([currentUserId] equals
+     * `fromUserId`, case-insensitive) it continues as the account through the same path as
+     * `identify(Identity.User)` (without the user-switch warning); entitlements are then
+     * refreshed either way.
+     *
+     * Failures: [ZeroSettleError.ReconcileRefused], [ZeroSettleError.InvalidLinkToken],
+     * [ZeroSettleError.RateLimited], otherwise [ZeroSettleError.BackendError] /
+     * [ZeroSettleError.NetworkError].
+     */
+    public suspend fun reconcile(linkToken: String): Result<com.zerosettle.sdk.models.ReconcileResult> {
+        val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
+        val result = be.reconcile(linkToken).getOrElse { return Result.failure(it) }
+        val current = currentUserIdOrNull()
+        if (current != null && current.equals(result.fromUserId, ignoreCase = true)) {
+            lastSignedInUserId = null
+            runIdentifyUser(result.intoUserId, null, null, warnOnSwitch = false).onFailure {
+                config?.logger?.warn("identity", "reconcile succeeded but switching to the account id failed: ${it.message}")
+            }
+        }
+        restoreEntitlements()
+        return Result.success(result)
     }
 
     private suspend fun bootstrap(userId: String): Result<ProductCatalog?> {
@@ -385,7 +478,10 @@ public object ZeroSettle {
         // run it off-thread so we don't block bootstrap on the no-op
         // `endConnection()` call (which marshals through Play services
         // even with no live connection).
-        oldCoordinator?.let { coord -> ioScope.launch { coord.shutdown() } }
+        // Never clear the queue here: a re-identify keeps its rows, and an A to B switch
+        // already cleared it synchronously in runIdentifyUser (an async clear would race
+        // the new coordinator's retryQueued and rows queued under B).
+        oldCoordinator?.let { coord -> ioScope.launch { coord.shutdown(clearQueue = false) } }
 
         playCoordinator?.start()
         entitlementPoller?.start(scope.scope)
@@ -452,6 +548,7 @@ public object ZeroSettle {
         playCoordinator = null
         scope.reset()
         _currentUserId.value = null
+        lastSignedInUserId = null
         customerName = null
         customerEmail = null
         _isBootstrapped.value = false
@@ -1271,8 +1368,8 @@ public object ZeroSettle {
     /**
      * Fire-and-forget impression report for an offer view
      * (`POST /v1/iap/offer-viewed/`). Safe to call from any thread; never throws.
-     * Resolves the current user, falling back to `"anonymous"` when no identity
-     * has been set. Uses the SDK's background [scope] — mirrors the fire-and-forget
+     * Resolves the user via [analyticsUserId] (the persisted anonymous UUID when no
+     * identity has been set). Uses the SDK's background [scope] — mirrors the fire-and-forget
      * pattern used for other non-blocking backend calls in this object.
      */
     public fun reportOfferViewed(
@@ -1280,9 +1377,11 @@ public object ZeroSettle {
         variantId: Int? = null,
         flowType: String = "migration",
     ) {
-        val uid = currentUserId.value?.ifEmpty { "anonymous" } ?: "anonymous"
         scope.scope.launch {
-            runCatching { backend?.reportOfferViewed(uid, productId, sessionId, variantId, flowType) }
+            runCatching {
+                val uid = analyticsUserId() ?: return@launch
+                backend?.reportOfferViewed(uid, productId, sessionId, variantId, flowType)
+            }
         }
     }
 
@@ -1433,6 +1532,8 @@ public object ZeroSettle {
         backend = null
         identityStore = null
         _currentUserId.value = null
+        lastSignedInUserId = null
+        userSwitchWarningCount = 0
         customerName = null
         customerEmail = null
     }

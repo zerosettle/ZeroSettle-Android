@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `ZeroSettle.trackEvent(FunnelEventType, productId, screenName, metadata)` — fire-and-forget paywall and checkout funnel events (`paywall_viewed`, `checkout_started`, `checkout_abandoned`).
+- `ZeroSettle.analyticsUserId()` — the current user id, or the persisted anonymous UUID that `identify(Identity.Anonymous)` adopts. `reportOfferViewed` now uses it instead of the literal `"anonymous"`.
+- `ZeroSettle.reconcile(linkToken)` returning `Result<ReconcileResult>`; new `ZeroSettleError.ReconcileRefused`, `InvalidLinkToken` and `RateLimited(retryAfterSeconds)`. Note for hosts that match `ZeroSettleError` exhaustively: add branches for the three new cases.
+- `identify(Identity.User)` logs a warning when one signed-in user replaces another without `logout()`, and clears the Play pending-sync queue at that moment. Re-identifying never wipes the queue now (previously an asynchronous shutdown cleared it on every identify).
+
 ## 1.2.0 — On-screen offer-impression tracking — 2026-06-01
 
 - `Modifier.offerImpression()` — report a ≥50%-on-screen impression once per session for any composable; auto-resolves the active offer via `ZeroSettle.currentOffer`.

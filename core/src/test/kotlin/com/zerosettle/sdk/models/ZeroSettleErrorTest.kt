@@ -28,6 +28,9 @@ class ZeroSettleErrorTest {
             ZeroSettleError.NotFound("missing"),
             ZeroSettleError.SwitchAndSaveUnavailable,
             ZeroSettleError.SwitchAndSaveRequiresActivity,
+            ZeroSettleError.ReconcileRefused,
+            ZeroSettleError.InvalidLinkToken,
+            ZeroSettleError.RateLimited(5L),
         )
         cases.forEach { e ->
             val handled: String = when (e) {
@@ -53,6 +56,9 @@ class ZeroSettleErrorTest {
                 is ZeroSettleError.NotFound -> "nf"
                 is ZeroSettleError.SwitchAndSaveUnavailable -> "sau"
                 is ZeroSettleError.SwitchAndSaveRequiresActivity -> "sara"
+                is ZeroSettleError.ReconcileRefused -> "rr"
+                is ZeroSettleError.InvalidLinkToken -> "ilt"
+                is ZeroSettleError.RateLimited -> "rl"
             }
             assertThat(handled).isNotEmpty()
         }

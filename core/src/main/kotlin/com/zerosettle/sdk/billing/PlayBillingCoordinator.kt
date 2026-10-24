@@ -332,9 +332,9 @@ internal class PlayBillingCoordinator(
         }
     }
 
-    /** logout(): clear the queue, end the Billing connection, unregister the callback. */
-    suspend fun shutdown() {
-        queue.clear()
+    /** logout(): clear the queue (unless [clearQueue] is false, for an identify rebuild), end the Billing connection, unregister the callback. */
+    suspend fun shutdown(clearQueue: Boolean = true) {
+        if (clearQueue) queue.clear()
         networkCallback?.let { cb -> runCatching { connectivityManager?.unregisterNetworkCallback(cb) } }
         networkCallback = null
         billing.endConnection()

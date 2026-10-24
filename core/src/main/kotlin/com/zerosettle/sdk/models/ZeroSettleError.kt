@@ -116,4 +116,24 @@ public sealed class ZeroSettleError : Exception() {
             "This Play→web migration offer must be accepted via acceptOffer(activity) " +
                 "— the Switch & Save flow requires an Activity for Google's disclosure dialog."
     }
+
+    /**
+     * [com.zerosettle.sdk.ZeroSettle.reconcile] was refused: the two ids could not be
+     * merged (for example both already own a purchase). A link token is single-use,
+     * even when refused.
+     */
+    public data object ReconcileRefused : ZeroSettleError() {
+        private fun readResolve(): Any = ReconcileRefused
+        override val message: String = "The identity reconcile was refused."
+    }
+    /** The link token passed to `reconcile` is invalid, expired or already used. */
+    public data object InvalidLinkToken : ZeroSettleError() {
+        private fun readResolve(): Any = InvalidLinkToken
+        override val message: String = "The link token is invalid, expired or already used."
+    }
+    /** The backend rate-limited the request; [retryAfterSeconds] is its `Retry-After` hint, if any. */
+    public data class RateLimited(val retryAfterSeconds: Long?) : ZeroSettleError() {
+        override val message: String get() =
+            "Rate limited" + (retryAfterSeconds?.let { ", retry after ${it}s" } ?: "")
+    }
 }
