@@ -150,7 +150,7 @@ public object ZeroSettle {
         // Coordinator.shutdown() is idempotent (clears queue, runCatching on the
         // network callback unregister) so launching off-thread is safe even if
         // the new coordinator boots before the old one finishes tearing down.
-        playCoordinator?.let { coord -> ioScope.launch { coord.shutdown() } }
+        playCoordinator?.let { coord -> ioScope.launch { coord.shutdown(clearQueue = false) } }
         playCoordinator = null
         entitlementPoller?.stop()
         entitlementPoller = null
@@ -344,9 +344,10 @@ public object ZeroSettle {
 
     /**
      * The one path `identify(Identity.User)` and `reconcile` both use to become a user.
-     * On a signed-in A to B switch without logout it warns (when [warnOnSwitch]) and
-     * clears the Play pending-sync queue synchronously, so purchases queued under A
-     * are never retried once B is active.
+     * On a signed-in A to B switch without logout it warns (when [warnOnSwitch]). The Play
+     * pending-sync queue is left alone: each row carries its own user id, so A's rows retry
+     * under A. Purchases made under A are kept out of B by the account-id check in
+     * `PlayBillingCoordinator`.
      */
     private suspend fun runIdentifyUser(
         id: String, name: String?, email: String?, warnOnSwitch: Boolean,
@@ -362,7 +363,6 @@ public object ZeroSettle {
                         "Purchases stay with the first id. If this is the same person, have your server reconcile the ids.",
                 )
             }
-            playCoordinator?.queue?.clear()
         }
         lastSignedInUserId = id
         _currentUserId.value = id
@@ -421,20 +421,25 @@ public object ZeroSettle {
      * refreshed either way.
      *
      * Failures: [ZeroSettleError.ReconcileRefused], [ZeroSettleError.InvalidLinkToken],
-     * [ZeroSettleError.RateLimited], otherwise [ZeroSettleError.BackendError] /
+     * [ZeroSettleError.RateLimited] (the token is still usable: retry after
+     * `retryAfterSeconds`), otherwise [ZeroSettleError.BackendError] /
      * [ZeroSettleError.NetworkError].
      */
     public suspend fun reconcile(linkToken: String): Result<com.zerosettle.sdk.models.ReconcileResult> {
         val be = backend ?: return Result.failure(ZeroSettleError.NotConfigured)
         val result = be.reconcile(linkToken).getOrElse { return Result.failure(it) }
-        val current = currentUserIdOrNull()
-        if (current != null && current.equals(result.fromUserId, ignoreCase = true)) {
-            lastSignedInUserId = null
-            runIdentifyUser(result.intoUserId, null, null, warnOnSwitch = false).onFailure {
-                config?.logger?.warn("identity", "reconcile succeeded but switching to the account id failed: ${it.message}")
+        // The token is spent and the move is done server-side, so finish adopting the
+        // account and refreshing even if the caller is cancelled.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            val current = currentUserIdOrNull()
+            if (current != null && current.equals(result.fromUserId, ignoreCase = true)) {
+                lastSignedInUserId = null
+                runIdentifyUser(result.intoUserId, null, null, warnOnSwitch = false).onFailure {
+                    config?.logger?.warn("identity", "reconcile succeeded but switching to the account id failed: ${it.message}")
+                }
             }
+            restoreEntitlements()
         }
-        restoreEntitlements()
         return Result.success(result)
     }
 
@@ -478,9 +483,8 @@ public object ZeroSettle {
         // run it off-thread so we don't block bootstrap on the no-op
         // `endConnection()` call (which marshals through Play services
         // even with no live connection).
-        // Never clear the queue here: a re-identify keeps its rows, and an A to B switch
-        // already cleared it synchronously in runIdentifyUser (an async clear would race
-        // the new coordinator's retryQueued and rows queued under B).
+        // Never clear the queue here: rows carry their own user id and retry under it, and
+        // an async clear would race the new coordinator's retryQueued.
         oldCoordinator?.let { coord -> ioScope.launch { coord.shutdown(clearQueue = false) } }
 
         playCoordinator?.start()
@@ -564,10 +568,12 @@ public object ZeroSettle {
         // PlayBillingCoordinator.shutdown is idempotent and the new
         // coordinator boots its own BillingClient session.
         playCoordinator = buildPlayCoordinator()
-        ioScope.launch {
-            oldCoordinator?.shutdown()
-            oldIdentityStore?.clear()
-        }
+        // The queue was cleared synchronously above, so the old coordinator must not clear it
+        // again (the new coordinator shares the DataStore). The identity store is cleared
+        // synchronously too, so analyticsUserId() right after logout never returns the
+        // previous guest UUID and a later async clear cannot wipe a newly minted one.
+        oldIdentityStore?.let { runBlocking { it.clear() } }
+        ioScope.launch { oldCoordinator?.shutdown(clearQueue = false) }
     }
 
     // ─── Observables ────────────────────────────────────────────────────────

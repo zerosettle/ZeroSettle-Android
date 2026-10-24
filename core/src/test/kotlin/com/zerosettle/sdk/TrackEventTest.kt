@@ -61,7 +61,10 @@ class TrackEventTest {
         assertThat(body.has("metadata")).isFalse()
     }
 
-    @Test fun beforeConfigure_dropsSilently() {
+    @Test fun beforeConfigure_dropsSilently_andMakesNoRequest() {
+        server.start()
         ZeroSettle.trackEvent(FunnelEventType.CHECKOUT_ABANDONED, productId = "pro")
+        assertThat(server.takeRequest(500, TimeUnit.MILLISECONDS)).isNull()
+        assertThat(server.requestCount).isEqualTo(0)
     }
 }

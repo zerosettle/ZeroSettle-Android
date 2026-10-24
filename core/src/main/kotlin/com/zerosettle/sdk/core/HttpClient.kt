@@ -47,8 +47,10 @@ internal class HttpClient(
                 val headers = resp.headers.names().associate { it.lowercase() to (resp.header(it) ?: "") }
                 Result.success(RawResponse(resp.code, headers, resp.body?.string().orEmpty()))
             }
-        } catch (io: IOException) {
-            Result.failure(ZeroSettleError.NetworkError(io))
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (e: Exception) {
+            Result.failure(ZeroSettleError.NetworkError(e))
         }
     }
 

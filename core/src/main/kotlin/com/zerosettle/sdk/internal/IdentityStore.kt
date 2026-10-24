@@ -19,11 +19,10 @@ internal class IdentityStore(private val context: Context) {
     private val keyCustomerEmail = stringPreferencesKey("customer_email")
 
     suspend fun anonymousUuid(): String {
-        val prefs = context.identityDataStore.data.first()
-        prefs[keyAnon]?.let { return it }
-        val fresh = UUID.randomUUID().toString()
-        context.identityDataStore.edit { it[keyAnon] = fresh }
-        return fresh
+        // Read-or-create inside one edit so concurrent first calls agree on one UUID.
+        return context.identityDataStore.edit { prefs ->
+            if (prefs[keyAnon] == null) prefs[keyAnon] = UUID.randomUUID().toString()
+        }[keyAnon]!!
     }
 
     suspend fun setActiveUserId(userId: String) {

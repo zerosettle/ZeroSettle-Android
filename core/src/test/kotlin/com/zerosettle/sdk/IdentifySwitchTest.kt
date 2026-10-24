@@ -3,6 +3,8 @@ package com.zerosettle.sdk
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.zerosettle.sdk.billing.PendingPurchaseSync
+import com.zerosettle.sdk.core.AppAccountToken
+import okhttp3.mockwebserver.MockResponse
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -60,22 +62,57 @@ class IdentifySwitchTest {
         assertThat(ZeroSettle.userSwitchWarningCount).isEqualTo(0)
     }
 
-    @Test fun switchAtoB_clearsPlaySyncQueue_deterministically() = runTest {
+    @Test fun switchAtoB_keepsAsRowForRetryUnderA() = runTest {
         ZeroSettle.identify(Identity.User(id = "A"))
         ZeroSettle.playSyncQueueForTesting().enqueue(row("tokA", "A"))
-        assertThat(ZeroSettle.playSyncQueueForTesting().pending()).hasSize(1)
         ZeroSettle.identify(Identity.User(id = "B"))
-        // Rows queued after the switch must survive the old coordinator's async shutdown.
-        ZeroSettle.playSyncQueueForTesting().enqueue(row("tokB", "B"))
-        Thread.sleep(300)
-        assertThat(ZeroSettle.playSyncQueueForTesting().pending().map { it.purchaseToken }).containsExactly("tokB")
+        val pending = ZeroSettle.playSyncQueueForTesting().pending()
+        assertThat(pending.map { it.purchaseToken }).containsExactly("tokA")
+        assertThat(pending.single().userId).isEqualTo("A")
     }
 
     @Test fun reidentifySameUser_keepsQueue() = runTest {
         ZeroSettle.identify(Identity.User(id = "A"))
         ZeroSettle.playSyncQueueForTesting().enqueue(row("tokA", "A"))
         ZeroSettle.identify(Identity.User(id = "A"))
-        Thread.sleep(300)
         assertThat(ZeroSettle.playSyncQueueForTesting().pending().map { it.purchaseToken }).containsExactly("tokA")
+    }
+
+    // ─── Purchases bought under another account are never synced under the current one ───
+
+    private val syncedUsers = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    private fun routeSync() {
+        server.dispatcher = routeBy(
+            bootstrapRoutes() + ("/v1/iap/play-store-transactions/" to { req ->
+                syncedUsers.add(org.json.JSONObject(req.body.readUtf8()).optString("user_id"))
+                MockResponse().setBody("""{"owned":true,"transaction_id":1,"transaction_ref":"txn_1"}""")
+            }),
+        )
+    }
+
+    private fun purchase(token: String, accountId: String?): com.android.billingclient.api.Purchase {
+        val acct = accountId?.let { ""","obfuscatedAccountId":"$it"""" } ?: ""
+        val json = """{"orderId":"GPA.1","packageName":"com.app","productId":"pro","purchaseTime":1700000000000,
+            "purchaseState":0,"purchaseToken":"$token","autoRenewing":true,"acknowledged":false$acct}"""
+        return com.android.billingclient.api.Purchase(json, "sig")
+    }
+
+    private fun tokenFor(uid: String) =
+        AppAccountToken.derive(uid, ApplicationProvider.getApplicationContext<android.content.Context>().packageName).toString()
+
+    @Test fun afterSwitchToB_purchaseWithAsToken_isNotSynced_butBsAndUntaggedAre() = runTest {
+        routeSync()
+        ZeroSettle.identify(Identity.User(id = "A"))
+        ZeroSettle.identify(Identity.User(id = "B"))
+        syncedUsers.clear()
+        ZeroSettle.playCoordinator!!.reconcileWithPurchasesForTesting(
+            subs = listOf(purchase("fromA", tokenFor("A"))), inapp = emptyList(),
+        )
+        assertThat(syncedUsers).isEmpty()
+        ZeroSettle.playCoordinator!!.reconcileWithPurchasesForTesting(
+            subs = listOf(purchase("fromB", tokenFor("B")), purchase("untagged", null)), inapp = emptyList(),
+        )
+        assertThat(syncedUsers).containsExactly("B", "B")
     }
 }

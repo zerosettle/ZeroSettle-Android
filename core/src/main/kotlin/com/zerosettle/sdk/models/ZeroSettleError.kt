@@ -131,7 +131,10 @@ public sealed class ZeroSettleError : Exception() {
         private fun readResolve(): Any = InvalidLinkToken
         override val message: String = "The link token is invalid, expired or already used."
     }
-    /** The backend rate-limited the request; [retryAfterSeconds] is its `Retry-After` hint, if any. */
+    /**
+     * The backend rate-limited the request; [retryAfterSeconds] is its `Retry-After` hint, if any.
+     * For `reconcile` the link token is still usable: retry after that delay.
+     */
     public data class RateLimited(val retryAfterSeconds: Long?) : ZeroSettleError() {
         override val message: String get() =
             "Rate limited" + (retryAfterSeconds?.let { ", retry after ${it}s" } ?: "")
