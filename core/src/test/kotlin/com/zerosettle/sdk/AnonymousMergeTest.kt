@@ -144,6 +144,29 @@ class AnonymousMergeTest {
         assertThat(store.pendingIdentityLink()).isEqualTo(PendingIdentityLink(anon, "acct-1"))
     }
 
+    @Test fun requestTimeout408_keepsPair() = runTest {
+        ZeroSettle.identify(Identity.Anonymous)
+        val anon = store.storedAnonymousId()!!
+        linkResponse = { MockResponse().setResponseCode(408) }
+        ZeroSettle.identify(Identity.User(id = "acct-1"))
+        assertThat(store.pendingIdentityLink()).isEqualTo(PendingIdentityLink(anon, "acct-1"))
+        assertThat(store.storedAnonymousId()).isEqualTo(anon)
+    }
+
+    @Test fun olderPairFailsTransiently_newPairIsStoredWithoutSecondAttempt() = runTest {
+        ZeroSettle.identify(Identity.Anonymous)
+        val anon = store.storedAnonymousId()!!
+        linkResponse = { MockResponse().setResponseCode(503) }
+        ZeroSettle.identify(Identity.User(id = "acct-1"))
+        assertThat(linkBodies).hasSize(1)
+
+        linkBodies.clear()
+        ZeroSettle.identify(Identity.User(id = "acct-2"))
+        assertThat(linkBodies).hasSize(1)
+        assertThat(linkBodies.single()).contains("acct-1")
+        assertThat(store.pendingIdentityLink()).isEqualTo(PendingIdentityLink(anon, "acct-2"))
+    }
+
     @Test fun noStoredAnonymousId_makesNoCall() = runTest {
         ZeroSettle.identify(Identity.User(id = "acct-1"))
         assertThat(linkBodies).isEmpty()

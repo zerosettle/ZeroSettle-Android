@@ -363,12 +363,14 @@ public object ZeroSettle {
         identityLinkMutex.withLock {
             val be = backend ?: return
             try {
-                store.pendingIdentityLink()?.let { sendIdentityLink(store, be, it) }
+                // One network attempt per identify: if the older pair fails transiently, the new
+                // pair is only stored for the next retry, so linking costs at most one timeout.
+                val olderSettled = store.pendingIdentityLink()?.let { sendIdentityLink(store, be, it) } ?: true
                 val anon = store.storedAnonymousId() ?: return
                 if (!IdentityStore.hasAnonymousPrefix(anon) || anon.equals(userId, ignoreCase = true)) return
                 val pair = PendingIdentityLink(from = anon, into = userId)
                 if (store.pendingIdentityLink() != pair) store.setPendingIdentityLink(pair)
-                sendIdentityLink(store, be, pair)
+                if (olderSettled) sendIdentityLink(store, be, pair)
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 throw ce
             } catch (e: Exception) {
@@ -394,11 +396,12 @@ public object ZeroSettle {
         }
     }
 
-    private suspend fun sendIdentityLink(store: IdentityStore, be: Backend, pair: PendingIdentityLink) {
+    /** Sends [pair]; true when the server settled it (the pair is dropped), false when it is kept for a retry. */
+    private suspend fun sendIdentityLink(store: IdentityStore, be: Backend, pair: PendingIdentityLink): Boolean {
         val failure = be.identityLink(pair.from, pair.into).exceptionOrNull()
         val settled = when (failure) {
             null -> true
-            is ZeroSettleError.BackendError -> failure.statusCode in 400..499
+            is ZeroSettleError.BackendError -> failure.statusCode in 400..499 && failure.statusCode != 408
             else -> false
         }
         if (settled) {
@@ -406,6 +409,7 @@ public object ZeroSettle {
         } else {
             config?.logger?.debug("identity", "identity link kept for retry: ${failure?.message}")
         }
+        return settled
     }
 
     /** The last signed-in (non-anonymous) id, used only to warn on a user-to-user switch. Cleared by logout. */
