@@ -39,11 +39,13 @@ internal class HttpClient(
 
     /**
      * Single-attempt POST that returns every HTTP status as a [RawResponse] (no retry:
-     * for single-use requests such as reconcile). IO failure → [ZeroSettleError.NetworkError].
+     * for single-use requests such as reconcile). A [timeoutMs] bounds the whole call; hitting it
+     * is an IO failure. IO failure → [ZeroSettleError.NetworkError].
      */
-    suspend fun postRaw(path: String, body: String): Result<RawResponse> = withContext(Dispatchers.IO) {
+    suspend fun postRaw(path: String, body: String, timeoutMs: Long? = null): Result<RawResponse> = withContext(Dispatchers.IO) {
         try {
-            ok.newCall(buildPost(path, body)).execute().use { resp ->
+            val client = if (timeoutMs == null) ok else ok.newBuilder().callTimeout(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS).build()
+            client.newCall(buildPost(path, body)).execute().use { resp ->
                 val headers = resp.headers.names().associate { it.lowercase() to (resp.header(it) ?: "") }
                 Result.success(RawResponse(resp.code, headers, resp.body?.string().orEmpty()))
             }

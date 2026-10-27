@@ -122,6 +122,16 @@ class AnonymousMergeTest {
         assertThat(store.storedAnonymousId()).isNull()
     }
 
+    @Test fun slowServer_timesOutAsNetworkError_keepsPair() = runTest {
+        ZeroSettle.identify(Identity.Anonymous)
+        val anon = store.storedAnonymousId()!!
+        linkResponse = { MockResponse().setBody("""{"status":"merged"}""").setBodyDelay(8, java.util.concurrent.TimeUnit.SECONDS) }
+        val started = System.nanoTime()
+        assertThat(ZeroSettle.identify(Identity.User(id = "acct-1")).isSuccess).isTrue()
+        assertThat((System.nanoTime() - started) / 1_000_000).isLessThan(7_500)
+        assertThat(store.pendingIdentityLink()).isEqualTo(PendingIdentityLink(anon, "acct-1"))
+    }
+
     @Test fun noStoredAnonymousId_makesNoCall() = runTest {
         ZeroSettle.identify(Identity.User(id = "acct-1"))
         assertThat(linkBodies).isEmpty()

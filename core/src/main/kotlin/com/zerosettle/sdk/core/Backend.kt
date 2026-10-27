@@ -179,14 +179,14 @@ internal class Backend(
     /**
      * `POST /v1/iap/identity-link/` — folds an anonymous id into a new account id. Unknown
      * `status` values read as [IdentityLinkStatus.SKIPPED]. 429 is [ZeroSettleError.RateLimited];
-     * any other non-2xx is [ZeroSettleError.BackendError] (400 `invalid_user_id` included).
+     * a timeout is a [ZeroSettleError.NetworkError] (5 s); any other non-2xx is [ZeroSettleError.BackendError] (400 `invalid_user_id` included).
      */
     suspend fun identityLink(previousUserId: String, userId: String): Result<IdentityLinkStatus> {
         val body = kotlinx.serialization.json.buildJsonObject {
             put("previous_user_id", kotlinx.serialization.json.JsonPrimitive(previousUserId))
             put("user_id", kotlinx.serialization.json.JsonPrimitive(userId))
         }.toString()
-        val raw = http.postRaw("/v1/iap/identity-link/", body).getOrElse { return Result.failure(it) }
+        val raw = http.postRaw("/v1/iap/identity-link/", body, timeoutMs = IDENTITY_LINK_TIMEOUT_MS).getOrElse { return Result.failure(it) }
         return when {
             raw.statusCode in 200..299 -> {
                 val status = runCatching {
@@ -201,6 +201,10 @@ internal class Backend(
             }
             else -> Result.failure(ZeroSettleError.BackendError(statusCode = raw.statusCode, body = raw.body))
         }
+    }
+
+    private companion object {
+        const val IDENTITY_LINK_TIMEOUT_MS = 5_000L
     }
 
     private fun errorCode(body: String): String? = runCatching {
