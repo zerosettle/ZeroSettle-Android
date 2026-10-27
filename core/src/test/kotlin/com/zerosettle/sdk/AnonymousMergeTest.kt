@@ -25,6 +25,8 @@ class AnonymousMergeTest {
     private val store get() = ZeroSettle.identityStore!!
 
     @Before fun setUp() = runTest {
+        // Start from an empty store so a pair left by an earlier test is not retried at configure.
+        com.zerosettle.sdk.internal.IdentityStore(ApplicationProvider.getApplicationContext()).clear()
         server = MockWebServer().also {
             it.dispatcher = routeBy(
                 bootstrapRoutes() + ("/v1/iap/identity-link/" to { r -> linkBodies.add(r.body.readUtf8()); linkResponse() }),
@@ -120,6 +122,16 @@ class AnonymousMergeTest {
         assertThat(linkBodies).containsExactly("""{"previous_user_id":"$anon","user_id":"acct-1"}""")
         assertThat(store.pendingIdentityLink()).isNull()
         assertThat(store.storedAnonymousId()).isNull()
+    }
+
+    // Connect-time failure: the server is gone, so the TCP connect is refused and no response exists.
+    @Test fun connectionRefused_keepsPair() = runTest {
+        ZeroSettle.identify(Identity.Anonymous)
+        val anon = store.storedAnonymousId()!!
+        server.shutdown()
+        // Bootstrap fails too with the server gone, so only the stored pair is asserted.
+        ZeroSettle.identify(Identity.User(id = "acct-1"))
+        assertThat(store.pendingIdentityLink()).isEqualTo(PendingIdentityLink(anon, "acct-1"))
     }
 
     @Test fun slowServer_timesOutAsNetworkError_keepsPair() = runTest {

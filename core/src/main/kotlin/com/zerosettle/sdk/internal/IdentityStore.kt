@@ -46,11 +46,14 @@ internal class IdentityStore(private val context: Context) {
         }
     }
 
-    /** Drops the pending pair and, if it is still [link]'s `from`, the stored anonymous id. */
+    /** Drops the pending pair if it is still [link], and the stored anonymous id if it is still [link]'s `from`. */
     suspend fun settleIdentityLink(link: PendingIdentityLink) {
         context.identityDataStore.edit { prefs ->
-            prefs.remove(keyPendingLinkFrom)
-            prefs.remove(keyPendingLinkInto)
+            // Only the pair that was sent settles; a newer pair written meanwhile stays.
+            if (prefs[keyPendingLinkFrom] == link.from && prefs[keyPendingLinkInto] == link.into) {
+                prefs.remove(keyPendingLinkFrom)
+                prefs.remove(keyPendingLinkInto)
+            }
             if (prefs[keyAnon] == link.from) prefs.remove(keyAnon)
         }
     }
