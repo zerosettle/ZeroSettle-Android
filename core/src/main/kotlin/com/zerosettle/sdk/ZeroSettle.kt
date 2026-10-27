@@ -4,8 +4,10 @@ import android.content.Context
 import com.zerosettle.sdk.billing.ExternalContentLinkClient
 import com.zerosettle.sdk.core.AppAccountToken
 import com.zerosettle.sdk.core.Backend
+import kotlinx.coroutines.sync.withLock
 import com.zerosettle.sdk.core.ZeroSettleEvent
 import com.zerosettle.sdk.internal.IdentityStore
+import com.zerosettle.sdk.internal.PendingIdentityLink
 import com.zerosettle.sdk.internal.ZeroSettleScope
 import com.zerosettle.sdk.models.Entitlement
 import com.zerosettle.sdk.models.PendingAction
@@ -178,6 +180,7 @@ public object ZeroSettle {
         )
         this.playCoordinator = buildPlayCoordinator()
         _isConfigured.value = true
+        retryPendingIdentityLink()
     }
 
     /**
@@ -313,7 +316,10 @@ public object ZeroSettle {
      *  - [Identity.User] — full bootstrap: fetch products, restore entitlements.
      *    Optional [Identity.User.name] / [Identity.User.email] are recorded as
      *    customer metadata for subsequent checkouts.
-     *  - [Identity.Anonymous] — generates a stable per-install UUID, bootstraps.
+     *  - [Identity.Anonymous] — generates a stable per-install id (`zs_anon_` plus a UUID), bootstraps.
+     *    A later `identify(Identity.User)` folds it into a new account (anonymous at launch,
+     *    user at sign-in; ids must be hard to guess). Ids starting with `zs_anon_` are reserved
+     *    and fail with [ZeroSettleError.InvalidUserId].
      *  - [Identity.Deferred] — records intent only; suppresses the
      *    "no identity declared" warning. Returns `Result.success(null)`.
      *
@@ -325,7 +331,15 @@ public object ZeroSettle {
         val store = identityStore ?: return Result.failure(ZeroSettleError.NotConfigured)
 
         return when (identity) {
-            is Identity.User -> runIdentifyUser(identity.id, identity.name, identity.email, warnOnSwitch = true)
+            is Identity.User -> {
+                if (IdentityStore.hasAnonymousPrefix(identity.id)) {
+                    return Result.failure(
+                        ZeroSettleError.InvalidUserId("ids starting with \"${IdentityStore.ANONYMOUS_ID_PREFIX}\" are reserved for anonymous sessions"),
+                    )
+                }
+                linkAnonymousIdentity(store, identity.id)
+                runIdentifyUser(identity.id, identity.name, identity.email, warnOnSwitch = true)
+            }
             Identity.Anonymous -> {
                 val uuid = store.anonymousUuid()
                 lastSignedInUserId = null
@@ -334,6 +348,63 @@ public object ZeroSettle {
                 bootstrap(uuid)
             }
             Identity.Deferred -> Result.success(null)
+        }
+    }
+
+    private val identityLinkMutex = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Folds the stored anonymous id into [userId] (`POST /v1/iap/identity-link/`). A pair left
+     * by an earlier attempt is retried first. Never throws and never fails identify: a network
+     * error, 5xx or 429 keeps the pair for the next identify or launch; merged, switched,
+     * skipped or any other 4xx settles it and drops the stored anonymous id.
+     */
+    private suspend fun linkAnonymousIdentity(store: IdentityStore, userId: String) {
+        identityLinkMutex.withLock {
+            val be = backend ?: return
+            try {
+                store.pendingIdentityLink()?.let { sendIdentityLink(store, be, it) }
+                val anon = store.storedAnonymousId() ?: return
+                if (!IdentityStore.hasAnonymousPrefix(anon) || anon.equals(userId, ignoreCase = true)) return
+                val pair = PendingIdentityLink(from = anon, into = userId)
+                if (store.pendingIdentityLink() != pair) store.setPendingIdentityLink(pair)
+                sendIdentityLink(store, be, pair)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                config?.logger?.warn("identity", "identity link skipped: ${e.message}")
+            }
+        }
+    }
+
+    /** Retries a pair left by an earlier launch. Called once from [configure]. */
+    private fun retryPendingIdentityLink() {
+        val store = identityStore ?: return
+        val be = backend ?: return
+        ioScope.launch {
+            identityLinkMutex.withLock {
+                try {
+                    store.pendingIdentityLink()?.let { sendIdentityLink(store, be, it) }
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    config?.logger?.warn("identity", "identity link retry skipped: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private suspend fun sendIdentityLink(store: IdentityStore, be: Backend, pair: PendingIdentityLink) {
+        val failure = be.identityLink(pair.from, pair.into).exceptionOrNull()
+        val settled = when (failure) {
+            null -> true
+            is ZeroSettleError.BackendError -> failure.statusCode in 400..499
+            else -> false
+        }
+        if (settled) {
+            store.settleIdentityLink(pair)
+        } else {
+            config?.logger?.debug("identity", "identity link kept for retry: ${failure?.message}")
         }
     }
 

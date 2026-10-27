@@ -176,6 +176,33 @@ internal class Backend(
         }
     }
 
+    /**
+     * `POST /v1/iap/identity-link/` — folds an anonymous id into a new account id. Unknown
+     * `status` values read as [IdentityLinkStatus.SKIPPED]. 429 is [ZeroSettleError.RateLimited];
+     * any other non-2xx is [ZeroSettleError.BackendError] (400 `invalid_user_id` included).
+     */
+    suspend fun identityLink(previousUserId: String, userId: String): Result<IdentityLinkStatus> {
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("previous_user_id", kotlinx.serialization.json.JsonPrimitive(previousUserId))
+            put("user_id", kotlinx.serialization.json.JsonPrimitive(userId))
+        }.toString()
+        val raw = http.postRaw("/v1/iap/identity-link/", body).getOrElse { return Result.failure(it) }
+        return when {
+            raw.statusCode in 200..299 -> {
+                val status = runCatching {
+                    (json.parseToJsonElement(raw.body) as? JsonObject)
+                        ?.get("status")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                }.getOrNull()
+                Result.success(IdentityLinkStatus.fromWire(status))
+            }
+            raw.statusCode == 429 -> {
+                val seconds = raw.headers["retry-after"]?.trim()?.toDoubleOrNull()?.takeIf { it >= 0 }?.toLong()
+                Result.failure(ZeroSettleError.RateLimited(seconds))
+            }
+            else -> Result.failure(ZeroSettleError.BackendError(statusCode = raw.statusCode, body = raw.body))
+        }
+    }
+
     private fun errorCode(body: String): String? = runCatching {
         (json.parseToJsonElement(body) as? JsonObject)
             ?.get("error")?.let { it as? JsonObject }
@@ -682,6 +709,19 @@ internal data class EntitlementsResponse(
     // currently surfaced via [PlaySyncResponse.conflict] / .claimAvailable instead.
     @SerialName("pending_claims") val pendingClaims: List<PendingClaim> = emptyList(),
 )
+
+/** Outcome of `identity-link`. The SDK treats all three as settled. */
+internal enum class IdentityLinkStatus {
+    MERGED, SWITCHED, SKIPPED;
+
+    companion object {
+        fun fromWire(value: String?): IdentityLinkStatus = when (value) {
+            "merged" -> MERGED
+            "switched" -> SWITCHED
+            else -> SKIPPED
+        }
+    }
+}
 
 @Serializable
 internal data class ReconcileWire(

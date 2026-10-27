@@ -1,6 +1,7 @@
 package com.zerosettle.ui
 
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.layout.boundsInWindow
@@ -9,6 +10,7 @@ import androidx.compose.ui.platform.LocalView
 import com.zerosettle.sdk.ZeroSettle
 import com.zerosettle.sdk.offers.BannerVisibility
 import com.zerosettle.sdk.offers.ImpressionDedupe
+import kotlinx.coroutines.launch
 
 /** Report an on-screen offer impression when this composable is >=50% visible,
  *  once per session. Auto-resolves the active offer; pass ids to override. */
@@ -19,6 +21,7 @@ public fun Modifier.offerImpression(
 ): Modifier = composed {
     val dedupe = remember { ImpressionDedupe() }
     val rootView = LocalView.current
+    val scope = rememberCoroutineScope()
     onGloballyPositioned { coords ->
         val b = coords.boundsInWindow()
         val card = BannerVisibility.Rect(b.left, b.top, b.right, b.bottom)
@@ -27,9 +30,11 @@ public fun Modifier.offerImpression(
         val resolved = if (productId != null) Triple(productId, variantId, flowType ?: "migration")
             else ZeroSettle.currentOffer.value?.let { Triple(it.productId, it.variantId, it.flowType) }
             ?: return@onGloballyPositioned
-        val uid = ZeroSettle.currentUserId.value?.ifEmpty { "anonymous" } ?: "anonymous"
-        val key = "$uid:${ZeroSettle.sessionId}:${resolved.second ?: -1}"
-        if (!dedupe.shouldReport(key)) return@onGloballyPositioned
-        ZeroSettle.reportOfferViewed(resolved.first, resolved.second, resolved.third)
+        scope.launch {
+            val uid = ZeroSettle.analyticsUserId() ?: return@launch
+            val key = "$uid:${ZeroSettle.sessionId}:${resolved.second ?: -1}"
+            if (!dedupe.shouldReport(key)) return@launch
+            ZeroSettle.reportOfferViewed(resolved.first, resolved.second, resolved.third)
+        }
     }
 }
