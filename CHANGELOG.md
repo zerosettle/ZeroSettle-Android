@@ -1,11 +1,16 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — Guest-to-account reconcile and anonymous merge — 2026-10-27
 
+Requires the matching backend (the `identity-link` endpoint and the reconcile link token).
+
+- `ZeroSettle.reconcile(linkToken)` returning `Result<ReconcileResult>` finishes a guest-to-account move with a token your server signed. New `ZeroSettleError.ReconcileRefused`, `InvalidLinkToken` and `RateLimited(retryAfterSeconds)`. Hosts that match `ZeroSettleError` exhaustively without an `else` branch must add branches for the three new cases or a default.
+- Anonymous to account merge: new anonymous ids are `zs_anon_` plus a lowercase UUID; ids stored by earlier versions are kept. `identify(Identity.User)` folds the stored anonymous id into the account through `identity-link`. On a network error, a timeout (the call is bounded to 5 seconds), a 5xx or a 429, the pair is kept and retried at configure and on each identify. The merge only moves history into an account that has none.
+- `identify(Identity.User)` with an id that starts with `zs_anon_` fails with `InvalidUserId`; the prefix is reserved. Use user ids that are hard to guess (a UUID or an opaque server-issued id, not an email or a sequential number).
+- `ZeroSettle.analyticsUserId()` — the current user id, or the persisted anonymous id that `identify(Identity.Anonymous)` adopts. `reportOfferViewed` now uses it instead of the literal `"anonymous"`, so counts of app users and paywall viewers rise once apps update.
 - `ZeroSettle.trackEvent(FunnelEventType, productId, screenName, metadata)` — fire-and-forget paywall and checkout funnel events (`paywall_viewed`, `checkout_started`, `checkout_abandoned`).
-- `ZeroSettle.analyticsUserId()` — the current user id, or the persisted anonymous UUID that `identify(Identity.Anonymous)` adopts. `reportOfferViewed` now uses it instead of the literal `"anonymous"`.
-- `ZeroSettle.reconcile(linkToken)` returning `Result<ReconcileResult>`; new `ZeroSettleError.ReconcileRefused`, `InvalidLinkToken` and `RateLimited(retryAfterSeconds)`. Note for hosts that match `ZeroSettleError` exhaustively: add branches for the three new cases.
 - `identify(Identity.User)` logs a warning when one signed-in user replaces another without `logout()`. Queued Play syncs keep their own user id and retry under it; the SDK does not filter purchases by account on the device, the backend attributes them by Play token. Re-identifying no longer wipes the Play pending-sync queue (an asynchronous shutdown used to clear it on every identify).
+- `logout()` now blocks the calling thread for one DataStore write: it clears the identity store synchronously, so `analyticsUserId()` right after `logout()` never returns the previous guest id. It already cleared the pending Play sync queue synchronously.
 
 ## 1.2.0 — On-screen offer-impression tracking — 2026-06-01
 
