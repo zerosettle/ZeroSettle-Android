@@ -1610,6 +1610,7 @@ public object ZeroSettle {
         appContext = null
         config = null
         backend = null
+        identityStore?.let { runBlocking { it.clear() } }
         identityStore = null
         _currentUserId.value = null
         lastSignedInUserId = null
