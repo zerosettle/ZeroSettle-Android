@@ -55,6 +55,17 @@ class PurchasePresentationOverrideTest {
 
     @After fun tearDown() { server.shutdown(); ZeroSettle.resetForTesting() }
 
+    /**
+     * Waits for the pending flag AND the launched activity. The SDK sets the flag
+     * before it launches on a background thread, so the flag alone can race.
+     */
+    private suspend fun awaitStartedActivity(activity: android.app.Activity) {
+        withTimeout(5000) {
+            while (!ZeroSettle.pendingCheckout.value) delay(10)
+            while (shadowOf(activity).peekNextStartedActivity() == null) delay(10)
+        }
+    }
+
     /** Mockwebserver dispatcher with route prefixes — see ZeroSettleWebPurchaseTest for context. */
     private fun routeBy(routes: Map<String, () -> MockResponse>): Dispatcher = object : Dispatcher() {
         override fun dispatch(request: RecordedRequest): MockResponse {
@@ -94,7 +105,7 @@ class PurchasePresentationOverrideTest {
         val purchaseJob = scope.async {
             ZeroSettle.purchase(activity, productId = "pro_monthly", presentation = CheckoutPresentation.INLINE)
         }
-        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        awaitStartedActivity(activity)
 
         val started = shadowOf(activity).nextStartedActivity
         assertThat(started).isNotNull()
@@ -118,7 +129,7 @@ class PurchasePresentationOverrideTest {
         val purchaseJob = scope.async {
             ZeroSettle.purchase(activity, productId = "pro_monthly", presentation = CheckoutPresentation.BROWSER)
         }
-        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        awaitStartedActivity(activity)
 
         val started = shadowOf(activity).nextStartedActivity
         assertThat(started).isNotNull()
@@ -145,7 +156,7 @@ class PurchasePresentationOverrideTest {
         val purchaseJob = scope.async {
             ZeroSettle.purchase(activity, productId = "pro_monthly", presentation = null)
         }
-        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        awaitStartedActivity(activity)
 
         val started = shadowOf(activity).nextStartedActivity
         assertThat(started).isNotNull()
@@ -170,7 +181,7 @@ class PurchasePresentationOverrideTest {
         val purchaseJob = scope.async {
             ZeroSettle.purchase(activity, productId = "pro_monthly")
         }
-        withTimeout(5000) { while (!ZeroSettle.pendingCheckout.value) delay(10) }
+        awaitStartedActivity(activity)
 
         val started = shadowOf(activity).nextStartedActivity
         assertThat(started).isNotNull()
