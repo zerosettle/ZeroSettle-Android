@@ -132,4 +132,18 @@ class ProductTest {
         val back = json.decodeFromString(Product.serializer(), encoded)
         assertThat(back.trial).isEqualTo(original.trial)
     }
+
+    @Test fun price_zeroDecimalCurrencyMicrosAreWholeUnits() {
+        val price = json.decodeFromString(
+            Price.serializer(), """{ "amount_micros": 1200000000, "currency_code": "JPY" }""")
+        assertThat(price.amountCents).isEqualTo(1200)
+        val encoded = json.encodeToString(Price.serializer(), price)
+        assertThat(encoded).contains("1200000000")
+    }
+
+    @Test fun price_threeDecimalCurrencyKeepsThousandths() {
+        val price = json.decodeFromString(
+            Price.serializer(), """{ "amount_micros": 1234000, "currency_code": "KWD" }""")
+        assertThat(price.amountCents).isEqualTo(1234)
+    }
 }

@@ -29,13 +29,15 @@ public enum class ProductType {
 }
 
 /**
- * Monetary value, fixed-precision cents + ISO currency code.
+ * Monetary value in the currency's minor unit + ISO currency code.
+ *
+ * [amountCents] keeps its name for source compatibility, but it is the minor unit:
+ * 999 is $9.99, and 1200 is 1,200 yen because yen has no minor unit.
  *
  * **Wire format note:** the backend (`api/iap_views.py`) emits `amount_micros`
- * — cents × 10,000 — on every product/price payload. The custom [PriceSerializer]
- * decodes that wire field and stores it as cents in [amountCents], so callers
- * always work in cents. This matches iOS Kit's `Price.swift` exactly (which
- * uses a custom Codable with the same rename + conversion).
+ * — millionths of the whole currency unit — on every product/price payload. The
+ * custom [PriceSerializer] decodes that wire field using the currency's own
+ * decimal places ([minorUnitDigits]). This matches iOS Kit's `Price` exactly.
  */
 @Serializable(with = PriceSerializer::class)
 public data class Price(
@@ -43,10 +45,35 @@ public data class Price(
     val currencyCode: String,
 )
 
+private val ZERO_DECIMAL_CURRENCIES = setOf(
+    "BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA",
+    "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF",
+)
+private val THREE_DECIMAL_CURRENCIES = setOf("BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND")
+
+/**
+ * Decimal places of the currency's minor unit. Mirrors the backend's
+ * `api/services/currency.py` (Stripe's rule: 0, 3, else 2).
+ */
+internal fun minorUnitDigits(currencyCode: String): Int {
+    val code = currencyCode.uppercase()
+    return when {
+        code in ZERO_DECIMAL_CURRENCIES -> 0
+        code in THREE_DECIMAL_CURRENCIES -> 3
+        else -> 2
+    }
+}
+
+private fun microsPerMinorUnit(currencyCode: String): Long {
+    var factor = 1L
+    repeat(6 - minorUnitDigits(currencyCode)) { factor *= 10L }
+    return factor
+}
+
 /**
  * Bridges the backend's `amount_micros` wire field to [Price.amountCents]
- * (and back, multiplying by 10,000 on encode for round-trip fidelity).
- * Mirrors iOS Kit `Price.swift` (custom Codable with the same shape).
+ * (and back, scaling by the currency's own minor unit on encode for round-trip
+ * fidelity). Mirrors iOS Kit's `Price` (custom Codable with the same shape).
  */
 internal object PriceSerializer : KSerializer<Price> {
     override val descriptor: SerialDescriptor = buildClassSerialDescriptor("Price") {
@@ -66,14 +93,14 @@ internal object PriceSerializer : KSerializer<Price> {
             }
         }
         Price(
-            amountCents = (amountMicros.toDouble() / 10_000.0).roundToInt(),
+            amountCents = (amountMicros.toDouble() / microsPerMinorUnit(currencyCode)).roundToInt(),
             currencyCode = currencyCode,
         )
     }
 
     override fun serialize(encoder: Encoder, value: Price) {
         encoder.encodeStructure(descriptor) {
-            encodeLongElement(descriptor, 0, value.amountCents.toLong() * 10_000L)
+            encodeLongElement(descriptor, 0, value.amountCents.toLong() * microsPerMinorUnit(value.currencyCode))
             encodeStringElement(descriptor, 1, value.currencyCode)
         }
     }

@@ -17,7 +17,7 @@ import java.util.Currency
 fun Price.formatted(): String =
     NumberFormat.getCurrencyInstance().also {
         it.currency = Currency.getInstance(currencyCode)
-    }.format(amountCents / 100.0)
+    }.format(amountCents / Math.pow(10.0, Currency.getInstance(currencyCode).defaultFractionDigits.toDouble()))
 
 @Composable
 fun CheckoutSheetHeader(
